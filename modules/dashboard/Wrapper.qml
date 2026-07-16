@@ -44,7 +44,11 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
 
-        active: root.shouldBeActive || root.visible
+        // Preloaded at startup and kept resident: sync-instantiating this
+        // tree on open froze the GUI thread mid-entrance (visible jank).
+        // Idle cost ~0 — all content animations are visibility-gated.
+        active: true
+        asynchronous: true
 
         sourceComponent: Content {
             screenState: root.screenState

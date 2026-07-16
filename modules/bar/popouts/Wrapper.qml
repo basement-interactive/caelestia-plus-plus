@@ -152,50 +152,35 @@ Item {
         id: comp
 
         property bool shouldBeActive
+        // Latched after first load: re-instantiating on every hover froze
+        // the GUI thread mid-animation (the loads here are synchronous on
+        // purpose — size must be set the same frame shouldBeActive flips).
+        property bool keepAlive: false
 
-        active: false
+        active: shouldBeActive || keepAlive
+        onStatusChanged: {
+            if (status === Loader.Ready)
+                keepAlive = true;
+        }
+
         opacity: 0
+        // Kept-alive content must not stay visible (or animate) while hidden.
+        visible: opacity > 0
 
-        // Makes the loader load on the same frame shouldBeActive becomes true, which ensures size is set
         states: State {
             name: "active"
             when: comp.shouldBeActive
 
             PropertyChanges {
                 comp.opacity: 1
-                comp.active: true
             }
         }
 
-        transitions: [
-            Transition {
-                from: ""
-                to: "active"
-
-                SequentialAnimation {
-                    PropertyAction {
-                        property: "active"
-                    }
-                    Anim {
-                        type: Anim.DefaultEffects
-                        property: "opacity"
-                    }
-                }
-            },
-            Transition {
-                from: "active"
-                to: ""
-
-                SequentialAnimation {
-                    Anim {
-                        type: Anim.DefaultEffects
-                        property: "opacity"
-                    }
-                    PropertyAction {
-                        property: "active"
-                    }
-                }
+        transitions: Transition {
+            Anim {
+                type: Anim.DefaultEffects
+                property: "opacity"
             }
-        ]
+        }
     }
 }

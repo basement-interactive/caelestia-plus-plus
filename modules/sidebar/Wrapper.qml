@@ -33,7 +33,10 @@ Item {
         anchors.margins: CUtils.clamp(anchors.leftMargin - Config.border.thickness, 0, anchors.leftMargin)
         anchors.bottomMargin: 0
 
-        active: root.shouldBeActive || root.visible
+        // Preloaded at startup and kept resident: sync-instantiating this
+        // tree on open froze the GUI thread mid-entrance (visible jank).
+        active: true
+        asynchronous: true
 
         sourceComponent: Content {
             implicitWidth: Tokens.sizes.sidebar.width - content.anchors.leftMargin - content.anchors.margins
