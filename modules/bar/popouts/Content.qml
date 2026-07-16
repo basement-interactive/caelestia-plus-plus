@@ -161,26 +161,11 @@ Item {
 
         required property string name
         readonly property bool shouldBeActive: root.popouts.currentName === name
-        // Reveal only once the async load finished: starting the entrance
-        // while the Loader instantiates blocks the GUI thread (~300ms for
-        // Network) and the timeline-based animation skips its first frames,
-        // which reads as extreme choppiness across the whole shell.
-        readonly property bool revealed: shouldBeActive && status === Loader.Ready
-        // Latched after first load so warm hovers reveal instantly instead
-        // of paying an async reload pause on every open.
-        property bool keepAlive: false
 
         anchors.centerIn: parent
 
         opacity: 0
-        asynchronous: true
-        active: shouldBeActive || keepAlive
-        onStatusChanged: {
-            if (status === Loader.Ready)
-                keepAlive = true;
-        }
-        // Kept-alive popouts must not render (or animate) while hidden.
-        visible: opacity > 0
+        active: false
 
         // Entrance choreography: descend from the bar while fading in
         transform: Translate {
@@ -191,9 +176,10 @@ Item {
 
         states: State {
             name: "active"
-            when: popout.revealed
+            when: popout.shouldBeActive
 
             PropertyChanges {
+                popout.active: true
                 popout.opacity: 1
                 slide.y: 0
             }
@@ -204,14 +190,19 @@ Item {
                 from: "active"
                 to: ""
 
-                ParallelAnimation {
-                    Anim {
-                        property: "opacity"
-                        type: Anim.DefaultEffects
+                SequentialAnimation {
+                    ParallelAnimation {
+                        Anim {
+                            property: "opacity"
+                            type: Anim.DefaultEffects
+                        }
+                        Anim {
+                            property: "y"
+                            type: Anim.Emphasized
+                        }
                     }
-                    Anim {
-                        property: "y"
-                        type: Anim.Emphasized
+                    PropertyAction {
+                        property: "active"
                     }
                 }
             },
@@ -219,14 +210,19 @@ Item {
                 from: ""
                 to: "active"
 
-                ParallelAnimation {
-                    Anim {
-                        property: "opacity"
-                        type: Anim.SlowEffects
+                SequentialAnimation {
+                    PropertyAction {
+                        property: "active"
                     }
-                    Anim {
-                        property: "y"
-                        type: Anim.Emphasized
+                    ParallelAnimation {
+                        Anim {
+                            property: "opacity"
+                            type: Anim.SlowEffects
+                        }
+                        Anim {
+                            property: "y"
+                            type: Anim.Emphasized
+                        }
                     }
                 }
             }

@@ -14,16 +14,25 @@ Item {
 
     implicitWidth: layout.implicitWidth + layout.anchors.margins * 2
 
-    ServiceRef {
-        service: Cpu
-    }
+    // Resident content: hold the poller refs only while on screen. Unseen
+    // percentage updates fire Behavior animations, and any running animation
+    // forces this whole window to render at 60fps even when invisible.
+    Loader {
+        active: root.visible
 
-    ServiceRef {
-        service: Memory
-    }
+        sourceComponent: Item {
+            ServiceRef {
+                service: Cpu
+            }
 
-    ServiceRef {
-        service: Storage
+            ServiceRef {
+                service: Memory
+            }
+
+            ServiceRef {
+                service: Storage
+            }
+        }
     }
 
     ColumnLayout {
