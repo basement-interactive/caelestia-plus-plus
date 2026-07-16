@@ -35,8 +35,11 @@ Item {
 
         // Preloaded at startup and kept resident: sync-instantiating this
         // tree on open froze the GUI thread mid-entrance (visible jank).
+        // Loaded synchronously at startup: async incubation raced service
+        // threads ("Cannot create children for a parent in a different
+        // thread") and silently aborted, leaving the panel empty.
         active: true
-        asynchronous: true
+
 
         sourceComponent: Content {
             implicitWidth: Tokens.sizes.sidebar.width - content.anchors.leftMargin - content.anchors.margins
