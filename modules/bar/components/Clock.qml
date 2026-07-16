@@ -9,15 +9,37 @@ import qs.services
 StyledRect {
     id: root
 
-    readonly property color colour: Colours.palette.m3tertiary
+    readonly property color colour: Colours.palette.m3primary
+    property bool fullscreen: false
     readonly property int padding: Config.bar.clock.background ? Tokens.padding.medium : Tokens.padding.extraSmall
     readonly property var font: Tokens.font.body.builders.small.scale(1.1)
 
     implicitWidth: layout.implicitWidth + root.padding * 2
     implicitHeight: Tokens.sizes.bar.innerWidth
 
-    color: Qt.alpha(Colours.tPalette.m3surfaceContainer, Config.bar.clock.background ? Colours.tPalette.m3surfaceContainer.a : 0)
+    color: Qt.alpha(Colours.tPalette.m3surfaceContainer, Config.bar.clock.background ? Colours.tPalette.m3surfaceContainer.a * 0.7 : 0)
     radius: Tokens.rounding.full
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, Config.bar.clock.background ? 0.4 : 0)
+    scale: hover.hovered ? 1.05 : 1
+
+    HoverHandler {
+        id: hover
+    }
+
+    Behavior on scale {
+        Anim {
+            type: Anim.FastSpatial
+        }
+    }
+
+    // Double-bezel: inner core nested inside the hairlined shell
+    StyledRect {
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.extraSmall / 2
+        radius: root.radius
+        color: Qt.alpha(Colours.tPalette.m3surfaceContainerHigh, Config.bar.clock.background ? Colours.tPalette.m3surfaceContainerHigh.a * 0.85 : 0)
+    }
 
     RowLayout {
         id: layout
@@ -65,12 +87,46 @@ StyledRect {
             }
         }
 
-        StyledText {
+        RowLayout {
             Layout.alignment: Qt.AlignVCenter
-            animate: true
-            text: `${Time.hourStr}:${Time.minuteStr}`
-            font: root.font.build()
-            color: root.colour
+            spacing: 0
+
+            StyledText {
+                animate: true
+                text: Time.hourStr
+                font: root.font.build()
+                color: root.colour
+            }
+
+            StyledText {
+                text: ":"
+                font: root.font.build()
+                color: root.colour
+
+                SequentialAnimation on opacity {
+                    running: root.visible && !root.fullscreen
+                    loops: Animation.Infinite
+                    alwaysRunToEnd: true
+
+                    Anim {
+                        to: 0.45
+                        duration: Tokens.anim.durations.extraLarge * 3
+                        easing: Tokens.anim.standardAccel
+                    }
+                    Anim {
+                        to: 1
+                        duration: Tokens.anim.durations.extraLarge * 3
+                        easing: Tokens.anim.standardDecel
+                    }
+                }
+            }
+
+            StyledText {
+                animate: true
+                text: Time.minuteStr
+                font: root.font.build()
+                color: root.colour
+            }
         }
 
         Loader {

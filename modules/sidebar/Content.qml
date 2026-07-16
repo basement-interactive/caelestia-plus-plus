@@ -22,6 +22,8 @@ Item {
 
             radius: Tokens.rounding.large
             color: Colours.tPalette.m3surfaceContainerLow
+            border.width: 1
+            border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
             NotifDock {
                 objectName: "sidebarNotifications"

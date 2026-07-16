@@ -8,7 +8,6 @@ import Caelestia.Config
 import qs.components
 import qs.services
 import qs.modules.nexus
-import qs.modules.windowinfo
 
 Item {
     id: root
@@ -17,7 +16,6 @@ Item {
     required property real offsetScale
 
     readonly property alias content: content
-    readonly property alias winfo: winfo
     readonly property alias nexus: nexus
 
     readonly property real nonAnimWidth: children.find(c => c.shouldBeActive)?.implicitWidth ?? content.implicitWidth
@@ -46,12 +44,8 @@ Item {
 
     function detach(mode: string): void {
         setAnims(true);
-        if (mode === "winfo") {
-            detachedMode = mode;
-        } else {
-            queuedMode = mode;
-            detachedMode = "any";
-        }
+        queuedMode = mode;
+        detachedMode = "any";
         setAnims(false);
         focus = true;
     }
@@ -112,18 +106,6 @@ Item {
 
         sourceComponent: Content {
             popouts: popoutState
-        }
-    }
-
-    Comp {
-        id: winfo
-
-        shouldBeActive: root.detachedMode === "winfo"
-        anchors.centerIn: parent
-
-        sourceComponent: WindowInfo {
-            screen: root.screen
-            client: Hypr.activeToplevel
         }
     }
 

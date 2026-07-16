@@ -118,6 +118,13 @@ ColumnLayout {
 
                 radius: Tokens.rounding.full
                 color: Qt.alpha(Colours.palette.m3primary, networkItem.modelData.active ? 1 : 0)
+                scale: wirelessLayer.pressed ? 0.92 : 1
+
+                Behavior on scale {
+                    Anim {
+                        type: Anim.FastSpatial
+                    }
+                }
 
                 CircularIndicator {
                     anchors.fill: parent
@@ -125,6 +132,8 @@ ColumnLayout {
                 }
 
                 StateLayer {
+                    id: wirelessLayer
+
                     color: networkItem.modelData.active ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
                     disabled: networkItem.loading || !Nmcli.wifiEnabled
 
@@ -175,8 +184,17 @@ ColumnLayout {
 
         radius: Tokens.rounding.full
         color: Colours.palette.m3primaryContainer
+        scale: rescanLayer.pressed ? 0.98 : 1
+
+        Behavior on scale {
+            Anim {
+                type: Anim.FastSpatial
+            }
+        }
 
         StateLayer {
+            id: rescanLayer
+
             color: Colours.palette.m3onPrimaryContainer
             disabled: Nmcli.scanning || !Nmcli.wifiEnabled
             onClicked: Nmcli.rescanWifi()
@@ -301,6 +319,13 @@ ColumnLayout {
 
                 radius: Tokens.rounding.full
                 color: Qt.alpha(Colours.palette.m3primary, ethernetItem.modelData.connected ? 1 : 0)
+                scale: ethernetLayer.pressed ? 0.92 : 1
+
+                Behavior on scale {
+                    Anim {
+                        type: Anim.FastSpatial
+                    }
+                }
 
                 CircularIndicator {
                     anchors.fill: parent
@@ -308,6 +333,8 @@ ColumnLayout {
                 }
 
                 StateLayer {
+                    id: ethernetLayer
+
                     color: ethernetItem.modelData.connected ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
                     disabled: ethernetItem.loading
 

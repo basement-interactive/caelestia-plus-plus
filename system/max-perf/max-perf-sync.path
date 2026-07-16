@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the max-perf toggle state written by caelestia
+
+[Path]
+PathModified=/home/john/.local/state/caelestia/max-perf
+Unit=max-perf-sync.service
+
+[Install]
+WantedBy=multi-user.target

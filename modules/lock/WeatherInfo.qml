@@ -18,6 +18,8 @@ StyledRect {
     }
     radius: Tokens.rounding.extraExtraLarge
     color: Colours.tPalette.m3surfaceContainer
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.35)
 
     Timer {
         running: true

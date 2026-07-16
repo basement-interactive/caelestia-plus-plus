@@ -8,6 +8,26 @@ import qs.components.controls
 import qs.services
 
 Item {
+    StyledRect {
+        anchors.fill: parent
+        anchors.margins: -Tokens.padding.small
+        radius: Tokens.rounding.large
+        color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+        Behavior on border.color {
+            CAnim {}
+        }
+
+        StyledRect {
+            anchors.fill: parent
+            anchors.margins: Tokens.padding.extraSmall
+            radius: Math.max(0, parent.radius - anchors.margins)
+            color: Colours.tPalette.m3surfaceContainer
+        }
+    }
+
     ColumnLayout {
         id: layout
 

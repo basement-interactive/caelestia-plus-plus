@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the anti-heat toggle state written by caelestia
+
+[Path]
+PathModified=/home/john/.local/state/caelestia/anti-heat
+Unit=anti-heat-sync.service
+
+[Install]
+WantedBy=multi-user.target

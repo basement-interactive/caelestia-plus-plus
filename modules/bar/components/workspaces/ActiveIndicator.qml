@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Effects
 import Caelestia.Config
 import qs.components
 import qs.components.effects
@@ -13,6 +14,8 @@ StyledRect {
     required property Repeater workspaces
     required property Item mask
     required property bool fullscreen
+
+    property real glowStrength: 0.4
 
     readonly property int currentWsIdx: {
         let i = activeWsId - 1;
@@ -42,24 +45,52 @@ StyledRect {
         cWs = currentWsIdx;
     }
 
-    clip: true
     x: offset + mask.x
     implicitHeight: Tokens.sizes.bar.innerWidth - Tokens.padding.small
     implicitWidth: size
     radius: Tokens.rounding.full
     color: Colours.palette.m3primary
 
-    Colouriser {
-        source: root.mask
-        sourceColor: Colours.palette.m3onSurface
-        colorizationColor: Colours.palette.m3onPrimary
+    RectangularShadow {
+        z: -1
+        anchors.fill: parent
+        radius: parent.radius
+        color: Qt.alpha(Colours.palette.m3primary, root.glowStrength)
+        blur: Tokens.padding.large
+        spread: 1
+        offset: Qt.vector2d(0, 0)
+    }
 
-        y: 0
-        x: -parent.offset
-        implicitWidth: root.mask.implicitWidth
-        implicitHeight: root.mask.implicitHeight
+    SequentialAnimation on glowStrength {
+        running: root.visible && !root.fullscreen
+        loops: Animation.Infinite
+        alwaysRunToEnd: true
 
-        anchors.verticalCenter: parent.verticalCenter
+        Anim {
+            to: 0.9
+            duration: Tokens.anim.durations.extraLarge * 3
+        }
+        Anim {
+            to: 0.4
+            duration: Tokens.anim.durations.extraLarge * 3
+        }
+    }
+
+    Item {
+        anchors.fill: parent
+        clip: true
+
+        Colouriser {
+            source: root.mask
+            sourceColor: Colours.palette.m3onSurface
+            colorizationColor: Colours.palette.m3onPrimary
+
+            x: -root.offset
+            implicitWidth: root.mask.implicitWidth
+            implicitHeight: root.mask.implicitHeight
+
+            anchors.verticalCenter: parent.verticalCenter
+        }
     }
 
     Behavior on leading {

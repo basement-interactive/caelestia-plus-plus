@@ -11,11 +11,24 @@ StyledRect {
 
     readonly property color accent: Colours.palette.m3tertiary
 
-    color: Colours.tPalette.m3surfaceContainer
+    color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
     radius: Tokens.rounding.medium
 
     implicitWidth: layout.implicitWidth + Tokens.padding.extraLargeIncreased * 2
     implicitHeight: layout.implicitHeight + Tokens.padding.large * 2
+
+    Behavior on border.color {
+        CAnim {}
+    }
+
+    StyledRect {
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.extraSmall
+        radius: Math.max(0, root.radius - anchors.margins)
+        color: Colours.tPalette.m3surfaceContainer
+    }
 
     ServiceRef {
         service: Memory

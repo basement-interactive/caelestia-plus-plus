@@ -22,25 +22,53 @@ StyledRect {
     readonly property int nonAnimHeight: summary.implicitHeight + (root.expanded ? Tokens.spacing.extraSmall * 2 + appName.height + body.height + actions.height + actions.anchors.topMargin : bodyPreview.height) + inner.anchors.margins * 2
     property bool expanded: Config.notifs.openExpanded
 
-    color: root.modelData.urgency === NotificationUrgency.Critical ? Colours.palette.m3secondaryContainer : Colours.tPalette.m3surfaceContainer
+    color: root.modelData.urgency === NotificationUrgency.Critical ? Qt.alpha(Colours.palette.m3secondaryContainer, 0.75) : Qt.alpha(Colours.palette.m3surfaceContainerHigh, 0.75)
     radius: Tokens.rounding.large
+
+    border.width: 1
+    border.color: Qt.alpha(root.modelData.urgency === NotificationUrgency.Critical ? Colours.palette.m3secondary : Colours.palette.m3outlineVariant, 0.4)
 
     implicitHeight: inner.implicitHeight
 
     x: implicitWidth
+    opacity: 0
+    scale: dragArea.pressed ? 0.98 : 1
     Component.onCompleted: {
         x = 0;
+        opacity = 1;
         modelData.lock(this);
     }
     Component.onDestruction: modelData.unlock(this)
 
     Behavior on x {
         Anim {
-            easing: Tokens.anim.emphasizedDecel
+            type: Anim.Emphasized
         }
     }
 
+    Behavior on opacity {
+        Anim {
+            type: Anim.DefaultEffects
+        }
+    }
+
+    Behavior on scale {
+        Anim {
+            type: dragArea.pressed ? Anim.FastSpatial : Anim.Emphasized
+        }
+    }
+
+    StyledRect {
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.extraSmall
+
+        radius: Math.max(0, root.radius - anchors.margins)
+        color: root.modelData.urgency === NotificationUrgency.Critical ? Colours.palette.m3secondaryContainer : Colours.tPalette.m3surfaceContainer
+    }
+
     MouseArea {
+        id: dragArea
+
         property int startY
 
         anchors.fill: parent
@@ -95,7 +123,7 @@ StyledRect {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: Tokens.padding.medium
+            anchors.margins: Tokens.padding.medium + Tokens.padding.extraSmall
 
             implicitHeight: root.nonAnimHeight
 
@@ -356,8 +384,17 @@ StyledRect {
 
                 implicitWidth: expandIcon.implicitHeight
                 implicitHeight: expandIcon.implicitHeight
+                scale: expandLayer.pressed ? 0.97 : 1
+
+                Behavior on scale {
+                    Anim {
+                        type: expandLayer.pressed ? Anim.FastSpatial : Anim.Emphasized
+                    }
+                }
 
                 StateLayer {
+                    id: expandLayer
+
                     radius: Tokens.rounding.full
                     color: root.modelData.urgency === NotificationUrgency.Critical ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurface
                     onClicked: root.expanded = !root.expanded

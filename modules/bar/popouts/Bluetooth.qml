@@ -119,6 +119,13 @@ ColumnLayout {
 
                 radius: Tokens.rounding.full
                 color: Qt.alpha(Colours.palette.m3primary, device.modelData.state === BluetoothDeviceState.Connected ? 1 : 0) // qmllint disable unresolved-type
+                scale: connectLayer.pressed ? 0.92 : 1
+
+                Behavior on scale {
+                    Anim {
+                        type: Anim.FastSpatial
+                    }
+                }
 
                 CircularIndicator {
                     anchors.fill: parent
@@ -126,6 +133,8 @@ ColumnLayout {
                 }
 
                 StateLayer {
+                    id: connectLayer
+
                     color: device.modelData.state === BluetoothDeviceState.Connected ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface // qmllint disable unresolved-type
                     disabled: device.loading
                     onClicked: device.modelData.connected = !device.modelData.connected
@@ -156,8 +165,17 @@ ColumnLayout {
                 sourceComponent: Item {
                     implicitWidth: connectBtn.implicitWidth
                     implicitHeight: connectBtn.implicitHeight
+                    scale: forgetLayer.pressed ? 0.92 : 1
+
+                    Behavior on scale {
+                        Anim {
+                            type: Anim.FastSpatial
+                        }
+                    }
 
                     StateLayer {
+                        id: forgetLayer
+
                         radius: Tokens.rounding.full
                         onClicked: device.modelData.forget()
                     }

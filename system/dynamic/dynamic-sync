@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Reconciles Dynamic mode with the toggle state written by caelestia's battery
+# menu (services/Dynamic.qml). Run by dynamic-sync.service, triggered by
+# dynamic-sync.path on every write to the state file, and once at boot to
+# catch a state left over from before shutdown.
+#
+# ON:  start the profile-picker loop.
+# OFF: stop it; dynamic.service's ExecStopPost clears the published tier.
+set -euo pipefail
+
+state_file=/home/john/.local/state/caelestia/dynamic
+state=$(cat "$state_file" 2>/dev/null || true)
+
+if [[ "$state" == "1" ]]; then
+    systemctl start dynamic.service
+else
+    systemctl stop dynamic.service 2>/dev/null || true
+fi

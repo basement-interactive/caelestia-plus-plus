@@ -63,7 +63,7 @@ TextField {
         }
 
         Timer {
-            running: root.activeFocus && root.cursorVisible && !cursor.disableBlink
+            running: root.visible && root.activeFocus && root.cursorVisible && !cursor.disableBlink
             repeat: true
             triggeredOnStart: true
             interval: 500

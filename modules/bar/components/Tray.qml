@@ -34,8 +34,20 @@ StyledRect {
     implicitHeight: Tokens.sizes.bar.innerWidth
     implicitWidth: nonAnimWidth
 
-    color: Qt.alpha(Colours.tPalette.m3surfaceContainer, (Config.bar.tray.background && items.count > 0) ? Colours.tPalette.m3surfaceContainer.a : 0)
+    readonly property bool hasBg: Config.bar.tray.background && items.count > 0
+
+    color: Qt.alpha(Colours.tPalette.m3surfaceContainer, hasBg ? Colours.tPalette.m3surfaceContainer.a * 0.7 : 0)
     radius: Tokens.rounding.full
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, hasBg ? 0.4 : 0)
+
+    // Double-bezel: inner core nested inside the hairlined shell
+    StyledRect {
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.extraSmall / 2
+        radius: root.radius
+        color: Qt.alpha(Colours.tPalette.m3surfaceContainerHigh, root.hasBg ? Colours.tPalette.m3surfaceContainerHigh.a * 0.85 : 0)
+    }
 
     Row {
         id: layout

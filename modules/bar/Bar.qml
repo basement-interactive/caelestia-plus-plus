@@ -51,6 +51,8 @@ RowLayout {
                 popouts.currentName = icon.name;
                 popouts.currentCenter = Qt.binding(() => icon.mapToItem(root, icon.implicitWidth / 2, 0).x);
                 popouts.hasCurrent = true;
+            } else {
+                popouts.hasCurrent = false;
             }
         } else if (id === "tray" && Config.bar.popouts.tray) {
             const tray = ch.item as Tray;
@@ -68,10 +70,11 @@ RowLayout {
                 popouts.hasCurrent = false;
                 tray.expanded = true;
             }
-        } else if (id === "activeWindow" && Config.bar.popouts.activeWindow && Config.bar.activeWindow.showOnHover) {
-            popouts.currentName = id.toLowerCase();
-            popouts.currentCenter = (ch.item as Item).mapToItem(root, (ch.item as Item).implicitWidth / 2, 0).x ?? 0;
-            popouts.hasCurrent = true;
+        } else {
+            // Entries without a popout of their own (firewall, features, …):
+            // clear any popout left open from a neighbouring entry, so it
+            // never overlaps their click menus.
+            popouts.hasCurrent = false;
         }
     }
 
@@ -147,6 +150,22 @@ RowLayout {
                 }
             }
             DelegateChoice {
+                roleValue: "firewall"
+                delegate: EntryWrapper {
+                    FirewallButton {
+                        objectName: "taskbarFirewall"
+                    }
+                }
+            }
+            DelegateChoice {
+                roleValue: "features"
+                delegate: EntryWrapper {
+                    FeaturesButton {
+                        objectName: "taskbarFeatures"
+                    }
+                }
+            }
+            DelegateChoice {
                 roleValue: "tray"
                 delegate: EntryWrapper {
                     Tray {
@@ -159,6 +178,7 @@ RowLayout {
                 delegate: EntryWrapper {
                     Clock {
                         objectName: "taskbarClock"
+                        fullscreen: root.fullscreen
                     }
                 }
             }
@@ -183,6 +203,8 @@ RowLayout {
     }
 
     component EntryWrapper: Item {
+        id: wrapper
+
         required property var modelData
         required property int index
         default property Item item
@@ -194,6 +216,38 @@ RowLayout {
 
         implicitWidth: item?.implicitWidth ?? 0
         implicitHeight: item?.implicitHeight ?? 0
+
+        opacity: 0
+
+        transform: Translate {
+            id: slide
+
+            y: -wrapper.Tokens.sizes.bar.innerWidth / 2
+        }
+
+        Component.onCompleted: entrance.restart()
+
+        SequentialAnimation {
+            id: entrance
+
+            PauseAnimation {
+                duration: wrapper.index * 50
+            }
+            ParallelAnimation {
+                Anim {
+                    target: wrapper
+                    property: "opacity"
+                    to: 1
+                    type: Anim.DefaultEffects
+                }
+                Anim {
+                    target: slide
+                    property: "y"
+                    to: 0
+                    type: Anim.Emphasized
+                }
+            }
+        }
 
         children: item
     }

@@ -59,6 +59,8 @@ StyledRect {
     clip: true
     radius: Tokens.rounding.large
     color: Colours.layer(Colours.palette.m3surfaceContainer, 2)
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.35)
 
     Behavior on implicitHeight {
         Anim {}
@@ -193,7 +195,17 @@ StyledRect {
                     color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3error : Colours.layer(Colours.palette.m3surfaceContainerHigh, 3)
                     radius: Tokens.rounding.full
 
+                    scale: expandLayer.pressed ? 0.97 : 1
+
+                    Behavior on scale {
+                        Anim {
+                            type: Anim.FastSpatial
+                        }
+                    }
+
                     StateLayer {
+                        id: expandLayer
+
                         color: root.urgency === NotificationUrgency.Critical ? Colours.palette.m3onError : Colours.palette.m3onSurface
                         onClicked: root.toggleExpand(!root.expanded)
                     }

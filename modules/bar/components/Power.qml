@@ -12,6 +12,8 @@ Item {
     implicitHeight: icon.implicitHeight
 
     StateLayer {
+        id: stateLayer
+
         // Cursed workaround to make the height larger than the parent
         anchors.fill: undefined
         anchors.centerIn: parent
@@ -27,7 +29,14 @@ Item {
         anchors.centerIn: parent
 
         text: "power_settings_new"
-        color: Colours.palette.m3error
+        color: stateLayer.containsMouse ? Qt.lighter(Colours.palette.m3error, 1.2) : Colours.palette.m3error
         fontStyle: Tokens.font.icon.builders.small.weight(Font.Bold).build()
+        scale: stateLayer.pressed ? 1.05 : stateLayer.containsMouse ? 1.2 : 1
+
+        Behavior on scale {
+            Anim {
+                type: Anim.FastSpatial
+            }
+        }
     }
 }

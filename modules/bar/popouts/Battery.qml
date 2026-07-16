@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell.Services.UPower
 import Caelestia.Config
 import qs.components
+import qs.components.controls
 import qs.services
 
 Column {
@@ -98,6 +99,8 @@ Column {
         id: profiles
 
         property string current: {
+            if (Dynamic.enabled)
+                return dyn.icon;
             const p = PowerProfiles.profile;
             if (p === PowerProfile.PowerSaver)
                 return saver.icon;
@@ -108,11 +111,13 @@ Column {
 
         anchors.horizontalCenter: parent.horizontalCenter
 
-        implicitWidth: saver.implicitHeight + balance.implicitHeight + perf.implicitHeight + Tokens.padding.medium * 2 + Tokens.spacing.largeIncreased * 2
-        implicitHeight: Math.max(saver.implicitHeight, balance.implicitHeight, perf.implicitHeight) + Tokens.padding.small
+        implicitWidth: saver.implicitWidth + balance.implicitWidth + perf.implicitWidth + dyn.implicitWidth + Tokens.spacing.largeIncreased * 3 + Tokens.padding.extraSmall * 2
+        implicitHeight: saver.implicitHeight + Tokens.padding.small
 
         color: Colours.tPalette.m3surfaceContainer
         radius: Tokens.rounding.full
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
         StyledRect {
             id: indicator
@@ -124,24 +129,19 @@ Column {
             states: [
                 State {
                     name: saver.icon
-
-                    Fill {
-                        item: saver
-                    }
+                    Fill { item: saver }
                 },
                 State {
                     name: balance.icon
-
-                    Fill {
-                        item: balance
-                    }
+                    Fill { item: balance }
                 },
                 State {
                     name: perf.icon
-
-                    Fill {
-                        item: perf
-                    }
+                    Fill { item: perf }
+                },
+                State {
+                    name: dyn.icon
+                    Fill { item: dyn }
                 }
             ]
 
@@ -164,7 +164,9 @@ Column {
         Profile {
             id: balance
 
-            anchors.centerIn: parent
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: saver.right
+            anchors.leftMargin: Tokens.spacing.largeIncreased
 
             profile: PowerProfile.Balanced
             icon: "balance"
@@ -174,12 +176,84 @@ Column {
             id: perf
 
             anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
-            anchors.rightMargin: Tokens.padding.extraSmall
+            anchors.left: balance.right
+            anchors.leftMargin: Tokens.spacing.largeIncreased
 
             profile: PowerProfile.Performance
             icon: "rocket_launch"
         }
+
+        Profile {
+            id: dyn
+
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: perf.right
+            anchors.leftMargin: Tokens.spacing.largeIncreased
+
+            dynamic: true
+            icon: "auto_mode"
+        }
+    }
+
+    StyledText {
+        width: root.width
+        visible: Dynamic.enabled
+
+        text: {
+            const t = Dynamic.currentTier;
+            const label = t === "power-saver" ? qsTr("Eco") : t === "balanced" ? qsTr("Balanced") : t === "performance" ? qsTr("Performance") : t === "yield" ? qsTr("paused — Max performance on") : qsTr("starting…");
+            return qsTr("Auto-switching by load — now: %1").arg(label);
+        }
+        color: Colours.palette.m3onSurfaceVariant
+        font: Tokens.font.body.small
+        wrapMode: Text.WordWrap
+    }
+
+    Item {
+        width: root.width
+        height: Math.max(bedIcon.implicitHeight, bedLabel.implicitHeight, bedSwitch.implicitHeight)
+
+        MaterialIcon {
+            id: bedIcon
+
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+
+            text: "bed"
+            color: Colours.palette.m3onSurfaceVariant
+        }
+
+        StyledText {
+            id: bedLabel
+
+            anchors.left: bedIcon.right
+            anchors.leftMargin: Tokens.spacing.medium
+            anchors.right: bedSwitch.left
+            anchors.rightMargin: Tokens.spacing.medium
+            anchors.verticalCenter: parent.verticalCenter
+
+            text: qsTr("Bed mode")
+            elide: Text.ElideRight
+        }
+
+        StyledSwitch {
+            id: bedSwitch
+
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+
+            checked: BedMode.enabled
+            onToggled: BedMode.setEnabled(checked)
+        }
+    }
+
+    StyledText {
+        width: root.width
+
+        text: qsTr("Much more sensitive fan curve for restricted airflow, e.g. on a bed")
+        color: Colours.palette.m3onSurfaceVariant
+        font: Tokens.font.body.small
+        wrapMode: Text.WordWrap
     }
 
     component Fill: AnchorChanges {
@@ -194,15 +268,25 @@ Column {
 
     component Profile: Item {
         required property string icon
-        required property int profile
+        property int profile: -1
+        property bool dynamic: false
 
         implicitWidth: icon.implicitHeight + Tokens.padding.small
         implicitHeight: icon.implicitHeight + Tokens.padding.small
 
         StateLayer {
+            id: profileLayer
+
             radius: Tokens.rounding.full
             color: profiles.current === parent.icon ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
-            onClicked: PowerProfiles.profile = parent.profile
+            onClicked: {
+                if (parent.dynamic) {
+                    Dynamic.setEnabled(true);
+                } else {
+                    Dynamic.setEnabled(false);
+                    PowerProfiles.profile = parent.profile;
+                }
+            }
         }
 
         MaterialIcon {
@@ -214,6 +298,13 @@ Column {
             fontStyle: Tokens.font.icon.large
             color: profiles.current === text ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
             fill: profiles.current === text ? 1 : 0
+            scale: profileLayer.pressed ? 0.9 : 1
+
+            Behavior on scale {
+                Anim {
+                    type: Anim.FastSpatial
+                }
+            }
 
             Behavior on fill {
                 Anim {

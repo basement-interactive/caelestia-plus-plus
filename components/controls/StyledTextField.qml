@@ -152,7 +152,7 @@ TextFieldBase {
 
             sourceComponent: MaterialIcon {
                 text: root.leadingIcon
-                color: Colours.palette.m3onSurfaceVariant
+                color: root.isError ? Colours.palette.m3error : root.activeFocus ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
                 fontStyle: Tokens.font.icon.builders.medium.scale(0.9).build()
             }
         }

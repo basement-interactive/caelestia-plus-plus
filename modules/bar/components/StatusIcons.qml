@@ -16,12 +16,22 @@ StyledRect {
     property color colour: Colours.palette.m3secondary
     readonly property alias items: iconRow
 
-    color: Colours.tPalette.m3surfaceContainer
+    color: Qt.alpha(Colours.tPalette.m3surfaceContainer, Colours.tPalette.m3surfaceContainer.a * 0.7)
     radius: Tokens.rounding.full
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
     clip: true
     implicitHeight: Tokens.sizes.bar.innerWidth
     implicitWidth: iconRow.implicitWidth + Tokens.padding.medium * 2 - (Config.bar.status.showLockStatus && !Hypr.capsLock && !Hypr.numLock ? iconRow.spacing : 0)
+
+    // Double-bezel: inner core nested inside the hairlined shell
+    StyledRect {
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.extraSmall / 2
+        radius: root.radius
+        color: Qt.alpha(Colours.tPalette.m3surfaceContainerHigh, Colours.tPalette.m3surfaceContainerHigh.a * 0.85)
+    }
 
     RowLayout {
         id: iconRow
@@ -208,7 +218,7 @@ StyledRect {
                         fill: 1
 
                         SequentialAnimation on opacity {
-                            running: device.modelData?.state !== BluetoothDeviceState.Connected // qmllint disable unresolved-type
+                            running: device.visible && device.modelData?.state !== BluetoothDeviceState.Connected // qmllint disable unresolved-type
                             alwaysRunToEnd: true
                             loops: Animation.Infinite
 

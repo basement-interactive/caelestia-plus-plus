@@ -1,0 +1,10 @@
+[Unit]
+Description=thinkfan - bed-mode sensitive fan curve
+Documentation=man:thinkfan(1) man:thinkfan.conf(5)
+ConditionPathExists=/etc/thinkfan-bed.yaml
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/thinkfan -n -q -c /etc/thinkfan-bed.yaml
+Restart=on-failure
+RestartSec=2

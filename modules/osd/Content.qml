@@ -24,6 +24,16 @@ Item {
     implicitWidth: layout.implicitWidth + Tokens.padding.large + layout.anchors.horizontalCenterOffset * 2
     implicitHeight: layout.implicitHeight + Tokens.padding.large * 2
 
+    StyledRect {
+        anchors.fill: layout
+        anchors.margins: -Tokens.padding.small
+
+        radius: Tokens.rounding.full
+        color: Qt.alpha(Colours.palette.m3surfaceContainer, 0.7)
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+    }
+
     ColumnLayout {
         id: layout
 

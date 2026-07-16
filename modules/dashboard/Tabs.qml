@@ -136,6 +136,13 @@ Item {
 
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
+            scale: pressed || stateLayer.pressed ? 0.97 : 1
+
+            Behavior on scale {
+                Anim {
+                    type: Anim.FastSpatial
+                }
+            }
 
             onPressed: root.screenState.dashboardTab = tab.TabBar.index
 

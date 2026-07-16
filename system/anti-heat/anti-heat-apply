@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Root half of the "Anti-Heat" feature. Run by anti-heat.service while the
+# mode is on.
+#
+#   run      loop forever, re-applying the heat caps (default)
+#   restore  lift the caps back to stock ceilings (service ExecStopPost)
+#
+# The heat lever here is a set of SMU power/thermal limits (ryzenadj power
+# mailbox), NOT Curve Optimizer. On this Rembrandt + locked ThinkPad BIOS the
+# SMU rejects set_coall ("set_coall is rejected by SMU"), so the old undervolt
+# was a permanent no-op. Power/thermal caps go through a different SMU mailbox
+# that firmware does NOT lock, and unlike a CO undervolt they actually bound
+# heat: the package can no longer boost past the sustained-power / Tctl target.
+#
+# The limits are re-applied every 30s because suspend and EC profile events
+# silently reset them to stock.
+#
+# Safety posture:
+#   - These are LIMITS, never overclocks: they only lower ceilings, so the
+#     worst case is a few percent less sustained boost, never instability.
+#   - restore raises the ceilings back to stock-class values; a reboot also
+#     fully resets them via BIOS/EC defaults.
+#   - The companion fan curve (thinkfan-cool) starts fans earlier than the
+#     EC's ~75C default, but only when no stronger curve (bed/max) is active;
+#     EC auto keeps running whenever thinkfan-cool is stopped.
+set -u
+
+# --- Anti-heat caps (tune here) --------------------------------------------
+# Thermal target: SMU trims boost to hold the package at/under this (deg C).
+TCTL_TEMP=80
+# Sustained / burst / average power limits (mW). Stock 7735U is ~28W class;
+# these pull the sustained envelope down to ~20-25W for a large temp drop at
+# a small sustained-perf cost. STAPM is clamped to the slow limit by the SMU.
+STAPM_LIMIT=20000
+FAST_LIMIT=25000
+SLOW_LIMIT=22000
+
+# --- Stock ceilings for restore (OFF path) ---------------------------------
+# Not byte-exact BIOS defaults (those are unknown), but high enough to hand
+# governing back to the EC/BIOS. A reboot restores exact defaults.
+STOCK_TCTL=95
+STOCK_STAPM=30000
+STOCK_FAST=40000
+STOCK_SLOW=30000
+# ---------------------------------------------------------------------------
+
+# Journal-visible state transitions only (no 30s spam) — same contract as
+# max-perf-apply: a silent ryzenadj failure is never acceptable.
+ryz_state=""
+
+apply_caps() {
+    local out
+    out=$(ryzenadj \
+        --tctl-temp="$TCTL_TEMP" \
+        --stapm-limit="$STAPM_LIMIT" \
+        --fast-limit="$FAST_LIMIT" \
+        --slow-limit="$SLOW_LIMIT" 2>&1)
+    if [[ $? -ne 0 || "$out" =~ [Rr]eject|[Ff]ail|[Uu]nable|[Ee]rror ]]; then
+        if [[ "$ryz_state" != failed ]]; then
+            echo "ryzenadj FAILED — heat caps NOT applied (is ryzen_smu loaded?): ${out:0:300}" >&2
+            ryz_state=failed
+        fi
+    elif [[ "$ryz_state" != ok ]]; then
+        echo "heat caps applied: tctl=${TCTL_TEMP}C stapm=${STAPM_LIMIT} fast=${FAST_LIMIT} slow=${SLOW_LIMIT} mW"
+        ryz_state=ok
+    fi
+}
+
+# The early fan curve yields to the stronger ones: bed and max both own the
+# fan while they run (thinkfan-cool Conflicts= them, so it is kicked off when
+# they start). Once they stop, this reconciler brings the cool curve back.
+ensure_fan_curve() {
+    if systemctl -q is-active thinkfan-bed.service || systemctl -q is-active thinkfan-max.service; then
+        return
+    fi
+    systemctl -q is-active thinkfan-cool.service || systemctl start thinkfan-cool.service
+}
+
+case "${1:-run}" in
+restore)
+    ryzenadj \
+        --tctl-temp="$STOCK_TCTL" \
+        --stapm-limit="$STOCK_STAPM" \
+        --fast-limit="$STOCK_FAST" \
+        --slow-limit="$STOCK_SLOW" >/dev/null 2>&1 || true
+    ;;
+run)
+    while :; do
+        apply_caps
+        ensure_fan_curve
+        sleep 30
+    done
+    ;;
+*)
+    echo "usage: $0 [run|restore]" >&2
+    exit 1
+    ;;
+esac

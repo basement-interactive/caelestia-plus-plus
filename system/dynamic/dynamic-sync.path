@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the Dynamic power-mode toggle state written by caelestia
+
+[Path]
+PathModified=/home/john/.local/state/caelestia/dynamic
+Unit=dynamic-sync.service
+
+[Install]
+WantedBy=multi-user.target

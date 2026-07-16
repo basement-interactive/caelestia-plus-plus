@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import Quickshell
 import QtQuick.Effects
 import QtQuick.Shapes
 import qs.components
@@ -11,6 +12,9 @@ Item {
 
     property real blurAmount: skipIntroAnimation ? 0.0 : 1.0
     property bool skipIntroAnimation: false
+    // Stars idle-float only once revealed; gated below on the surface being visible
+    property bool starsRevealed: skipIntroAnimation
+    readonly property QsWindow hostWindow: QsWindow.window as QsWindow
 
     property real star1Opacity: skipIntroAnimation ? 1.0 : 0.0
     property real star2Opacity: skipIntroAnimation ? 1.0 : 0.0
@@ -162,7 +166,10 @@ Item {
 
     SequentialAnimation {
         running: !root.skipIntroAnimation
-        onFinished: root.animationCompleted()
+        onFinished: {
+            root.starsRevealed = true;
+            root.animationCompleted();
+        }
 
         ParallelAnimation {
             SequentialAnimation {
@@ -369,7 +376,8 @@ Item {
     }
 
     SequentialAnimation {
-        running: true
+        // Idle accent: gentle 5-6s star float, only while the nexus surface shows the logo
+        running: root.visible && (root.hostWindow?.visible ?? false) && root.starsRevealed
         loops: Animation.Infinite
 
         PauseAnimation {

@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell.Services.SystemTray
 import Caelestia.Config
+import qs.components
 import qs.components.effects
 import qs.services
 import qs.utils
@@ -30,5 +31,12 @@ MouseArea {
         source: Icons.getTrayIcon(root.modelData.id, root.modelData.icon)
         colour: Colours.palette.m3secondary
         layer.enabled: Config.bar.tray.recolour
+        scale: root.pressed ? 0.9 : 1
+
+        Behavior on scale {
+            Anim {
+                type: Anim.FastSpatial
+            }
+        }
     }
 }

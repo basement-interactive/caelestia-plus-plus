@@ -1,0 +1,27 @@
+# Aggressive fan curve for bed-mode: laptop sitting somewhere with restricted
+# airflow, so heat can't escape as fast as it normally would. Compared to the
+# firmware's own "balanced" curve, this starts the fans almost at idle,
+# reaches the EC's max regulated level (7) by ~56C, and above ~64C drops the
+# EC rpm cap entirely ("disengaged" = fan runs flat out, ~4500-5000rpm).
+# Loud, but that's the point: heat has nowhere else to go.
+#
+# Only active while thinkfan-bed.service is running; bed-mode leaves it
+# stopped otherwise so the EC's normal automatic curve (driven by
+# power-profiles-daemon) takes back over.
+
+sensors:
+  - hwmon: /sys/class/hwmon
+    name: k10temp
+    indices: [1] # Tctl
+
+fans:
+  - tpacpi: /proc/acpi/ibm/fan
+
+levels:
+  - [0, 0, 34]
+  - [2, 32, 40]
+  - [4, 38, 46]
+  - [5, 44, 52]
+  - [6, 50, 58]
+  - [7, 56, 64]
+  - ["level disengaged", 60, 32767]

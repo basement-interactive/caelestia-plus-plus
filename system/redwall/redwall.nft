@@ -1,0 +1,29 @@
+#!/usr/sbin/nft -f
+# Redwall outbound firewall ruleset. inet family = covers IPv4 and IPv6.
+#
+# Idempotent load: create-then-delete flushes any previous instance before
+# redefining, so `nft -f` can be re-run safely.
+table inet redwall
+delete table inet redwall
+
+table inet redwall {
+    chain output {
+        type filter hook output priority filter; policy accept;
+
+        # Never touch loopback, ICMP, or already-approved flows.
+        # (ICMP is allowed unconditionally — ping/path-MTU; ICMP tunnels are
+        # out of scope for this outbound filter.)
+        oifname "lo" accept
+        meta l4proto { icmp, icmpv6 } accept
+        ct state established,related accept
+
+        # Hand every NEW outbound TCP/UDP connection to the daemon for a verdict.
+        # DNS (:53) is queued too so a denied app cannot use it to reach the net;
+        # the daemon auto-allows :53 for non-denied apps without prompting, so
+        # normal name resolution never stalls.
+        # `bypass` = if no process is listening on the queue (daemon down), the
+        # kernel ACCEPTS instead of dropping: the firewall fails OPEN and never
+        # cuts the machine off the network.
+        ct state new meta l4proto { tcp, udp } queue num 0 bypass
+    }
+}

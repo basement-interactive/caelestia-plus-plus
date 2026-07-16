@@ -55,6 +55,11 @@ Variants {
                 screen: win.modelData
                 wallpaper: wallpaper
             }
+
+            DesktopVisualiser {
+                anchors.centerIn: parent
+                screen: win.modelData
+            }
         }
 
         Loader {

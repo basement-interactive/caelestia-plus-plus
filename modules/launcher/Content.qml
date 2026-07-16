@@ -14,6 +14,7 @@ Item {
     required property ScreenState screenState
     required property var panels
     required property real maxHeight
+    property real openProgress: 1
 
     readonly property int padding: Tokens.padding.large
     readonly property int rounding: Tokens.rounding.extraLarge
@@ -30,6 +31,28 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: search.top
         anchors.bottomMargin: root.padding
+
+        transform: Translate {
+            y: (1 - root.openProgress) * Tokens.padding.large
+        }
+
+        StyledRect {
+            anchors.fill: list
+            anchors.margins: -Tokens.padding.small
+
+            radius: root.rounding
+            color: Qt.alpha(Colours.palette.m3surfaceContainer, 0.7)
+            border.width: 1
+            border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+            StyledRect {
+                anchors.fill: parent
+                anchors.margins: Tokens.padding.extraSmall
+
+                radius: parent.radius - anchors.margins
+                color: Colours.tPalette.m3surfaceContainerLow
+            }
+        }
 
         ContentList {
             id: list
@@ -57,6 +80,9 @@ Item {
 
         topPadding: Math.round((Tokens.padding.medium + Tokens.padding.large) / 2)
         bottomPadding: Math.round((Tokens.padding.medium + Tokens.padding.large) / 2)
+
+        bg.border.width: 1
+        bg.border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
         placeholderText: qsTr("Type \"%1\" for commands").arg(GlobalConfig.launcher.actionPrefix)
 

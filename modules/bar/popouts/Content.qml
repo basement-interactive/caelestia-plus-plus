@@ -24,13 +24,6 @@ Item {
         anchors.margins: Tokens.padding.large
 
         Popout {
-            name: "activewindow"
-            sourceComponent: ActiveWindow {
-                popouts: root.popouts
-            }
-        }
-
-        Popout {
             id: networkPopout
 
             name: "network"
@@ -174,6 +167,13 @@ Item {
         opacity: 0
         active: false
 
+        // Entrance choreography: descend from the bar while fading in
+        transform: Translate {
+            id: slide
+
+            y: -popout.Tokens.padding.large
+        }
+
         states: State {
             name: "active"
             when: popout.shouldBeActive
@@ -181,6 +181,7 @@ Item {
             PropertyChanges {
                 popout.active: true
                 popout.opacity: 1
+                slide.y: 0
             }
         }
 
@@ -190,9 +191,15 @@ Item {
                 to: ""
 
                 SequentialAnimation {
-                    Anim {
-                        property: "opacity"
-                        type: Anim.DefaultEffects
+                    ParallelAnimation {
+                        Anim {
+                            property: "opacity"
+                            type: Anim.DefaultEffects
+                        }
+                        Anim {
+                            property: "y"
+                            type: Anim.Emphasized
+                        }
                     }
                     PropertyAction {
                         property: "active"
@@ -207,9 +214,15 @@ Item {
                     PropertyAction {
                         property: "active"
                     }
-                    Anim {
-                        property: "opacity"
-                        type: Anim.SlowEffects
+                    ParallelAnimation {
+                        Anim {
+                            property: "opacity"
+                            type: Anim.SlowEffects
+                        }
+                        Anim {
+                            property: "y"
+                            type: Anim.Emphasized
+                        }
                     }
                 }
             }

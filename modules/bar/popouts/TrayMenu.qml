@@ -97,8 +97,17 @@ StackView {
 
                     sourceComponent: Item {
                         implicitHeight: label.implicitHeight
+                        scale: entryLayer.pressed ? 0.97 : 1
+
+                        Behavior on scale {
+                            Anim {
+                                type: Anim.FastSpatial
+                            }
+                        }
 
                         StateLayer {
+                            id: entryLayer
+
                             anchors.margins: -Tokens.padding.extraSmall / 2
                             anchors.leftMargin: -Tokens.padding.small
                             anchors.rightMargin: -Tokens.padding.small
@@ -189,6 +198,8 @@ StackView {
                     implicitHeight: back.implicitHeight
 
                     StyledRect {
+                        id: backRect
+
                         anchors.fill: parent
                         anchors.margins: -Tokens.padding.extraSmall / 2
                         anchors.leftMargin: -Tokens.padding.small
@@ -196,8 +207,17 @@ StackView {
 
                         radius: Tokens.rounding.full
                         color: Colours.palette.m3secondaryContainer
+                        scale: backLayer.pressed ? 0.97 : 1
+
+                        Behavior on scale {
+                            Anim {
+                                type: Anim.FastSpatial
+                            }
+                        }
 
                         StateLayer {
+                            id: backLayer
+
                             radius: parent.radius
                             color: Colours.palette.m3onSecondaryContainer
                             onClicked: root.pop()

@@ -38,32 +38,6 @@ Item {
     implicitWidth: icon.implicitWidth + current.implicitWidth + current.anchors.leftMargin
     implicitHeight: Math.max(icon.implicitHeight, current.implicitHeight)
 
-    Loader {
-        asynchronous: true
-        anchors.fill: parent
-        active: !Config.bar.activeWindow.showOnHover
-
-        sourceComponent: MouseArea {
-            cursorShape: Qt.PointingHandCursor
-            hoverEnabled: true
-            onPositionChanged: {
-                const popouts = root.bar.popouts;
-                if (popouts.hasCurrent && popouts.currentName !== "activewindow")
-                    popouts.hasCurrent = false;
-            }
-            onClicked: {
-                const popouts = root.bar.popouts;
-                if (popouts.hasCurrent) {
-                    popouts.hasCurrent = false;
-                } else {
-                    popouts.currentName = "activewindow";
-                    popouts.currentCenter = root.mapToItem(root.bar, root.implicitWidth / 2, 0).x;
-                    popouts.hasCurrent = true;
-                }
-            }
-        }
-    }
-
     MaterialIcon {
         id: icon
 
@@ -71,7 +45,26 @@ Item {
 
         animate: true
         text: Icons.getAppCategoryIcon(Hypr.activeToplevel?.lastIpcObject.class, "desktop_windows")
+        onTextChanged: iconPop.restart()
         color: root.colour
+    }
+
+    SequentialAnimation {
+        id: iconPop
+
+        Anim {
+            target: icon
+            property: "scale"
+            to: 0.7
+            duration: Tokens.anim.durations.small
+            easing: Tokens.anim.standardAccel
+        }
+        Anim {
+            target: icon
+            property: "scale"
+            to: 1
+            type: Anim.FastSpatial
+        }
     }
 
     Title {

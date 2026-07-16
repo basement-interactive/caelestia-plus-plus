@@ -33,8 +33,9 @@ StyledListView {
     highlightFollowsCurrentItem: false
     highlight: StyledRect {
         radius: Tokens.rounding.large
-        color: Colours.palette.m3onSurface
-        opacity: 0.08
+        color: Qt.alpha(Colours.palette.m3onSurface, 0.08)
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
         y: root.currentItem?.y ?? 0
         implicitWidth: root.width

@@ -24,13 +24,72 @@ Item {
         spacing: Tokens.spacing.extraLarge
 
         CoverVisualiser {
+            id: coverVis
+
+            property real revealOffset: Tokens.padding.large
+
             Layout.fillHeight: true
             implicitWidth: Tokens.sizes.dashboard.mediaSectionWidth
+            opacity: 0
+
+            transform: Translate {
+                y: coverVis.revealOffset
+            }
+
+            SequentialAnimation {
+                running: true
+
+                ParallelAnimation {
+                    Anim {
+                        target: coverVis
+                        property: "opacity"
+                        to: 1
+                        type: Anim.DefaultEffects
+                    }
+                    Anim {
+                        target: coverVis
+                        property: "revealOffset"
+                        to: 0
+                        type: Anim.DefaultSpatial
+                    }
+                }
+            }
         }
 
         Item {
+            id: mediaBody
+
+            property real revealOffset: Tokens.padding.large
+
             Layout.fillWidth: true
             Layout.fillHeight: true
+            opacity: 0
+
+            transform: Translate {
+                y: mediaBody.revealOffset
+            }
+
+            SequentialAnimation {
+                running: true
+
+                PauseAnimation {
+                    duration: 60
+                }
+                ParallelAnimation {
+                    Anim {
+                        target: mediaBody
+                        property: "opacity"
+                        to: 1
+                        type: Anim.DefaultEffects
+                    }
+                    Anim {
+                        target: mediaBody
+                        property: "revealOffset"
+                        to: 0
+                        type: Anim.DefaultSpatial
+                    }
+                }
+            }
 
             state: Players.active ? "" : "noMedia"
 

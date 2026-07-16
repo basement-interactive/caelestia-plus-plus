@@ -113,7 +113,7 @@ Item {
         id: empty
 
         opacity: root.currentList?.count === 0 ? 1 : 0
-        scale: root.currentList?.count === 0 ? 1 : 0.5
+        scale: root.currentList?.count === 0 ? 1 : 0.92
 
         spacing: Tokens.spacing.medium
         padding: Tokens.padding.large
@@ -121,12 +121,25 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
 
-        MaterialIcon {
-            text: root.state === "wallpapers" ? "wallpaper_slideshow" : "manage_search"
-            color: Colours.palette.m3onSurfaceVariant
-            fontStyle: Tokens.font.icon.extraLarge
+        StyledRect {
+            implicitWidth: emptyIcon.implicitHeight + Tokens.padding.large * 2
+            implicitHeight: implicitWidth
+
+            radius: Tokens.rounding.full
+            color: Colours.tPalette.m3surfaceContainerHigh
+            border.width: 1
+            border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.3)
 
             anchors.verticalCenter: parent.verticalCenter
+
+            MaterialIcon {
+                id: emptyIcon
+
+                anchors.centerIn: parent
+                text: root.state === "wallpapers" ? "wallpaper_slideshow" : "manage_search"
+                color: Colours.palette.m3onSurfaceVariant
+                fontStyle: Tokens.font.icon.extraLarge
+            }
         }
 
         Column {
@@ -142,6 +155,7 @@ Item {
                 text: root.state === "wallpapers" && Wallpapers.list.length === 0 ? qsTr("Try putting some wallpapers in %1").arg(Paths.shortenHome(Paths.wallsdir)) : qsTr("Try searching for something else")
                 color: Colours.palette.m3onSurfaceVariant
                 font: Tokens.font.body.medium
+                opacity: 0.7
             }
         }
 

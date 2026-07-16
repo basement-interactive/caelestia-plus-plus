@@ -116,6 +116,8 @@ CustomMouseArea {
                 implicitHeight: monthYearDisplay.implicitHeight + Tokens.padding.extraSmall * 2
 
                 StateLayer {
+                    id: monthState
+
                     color: Colours.palette.m3primary
                     radius: pressed ? Tokens.rounding.small : height / 2
                     disabled: {
@@ -133,6 +135,14 @@ CustomMouseArea {
 
                 StyledText {
                     id: monthYearDisplay
+
+                    scale: monthState.pressed ? 0.97 : 1
+
+                    Behavior on scale {
+                        Anim {
+                            type: Anim.FastSpatial
+                        }
+                    }
 
                     opacity: root.animOpacity
                     transform: Translate {

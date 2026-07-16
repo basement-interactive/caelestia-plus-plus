@@ -1,0 +1,9 @@
+[Unit]
+Description=Sync the anti-heat undervolt to the caelestia toggle state
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/anti-heat-sync
+
+[Install]
+WantedBy=multi-user.target

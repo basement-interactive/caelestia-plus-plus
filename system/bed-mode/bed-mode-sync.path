@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the bed-mode toggle state written by caelestia
+
+[Path]
+PathModified=/home/john/.local/state/caelestia/bed-mode
+Unit=bed-mode-sync.service
+
+[Install]
+WantedBy=multi-user.target

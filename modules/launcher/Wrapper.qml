@@ -40,7 +40,9 @@ Item {
     Component.onCompleted: Qt.callLater(() => Apps) // Load apps on init
 
     Behavior on offsetScale {
-        Anim {}
+        Anim {
+            type: root.shouldBeActive ? Anim.DefaultSpatial : Anim.Emphasized
+        }
     }
 
     Loader {
@@ -55,6 +57,7 @@ Item {
             screenState: root.screenState
             panels: root.panels
             maxHeight: root.maxHeight
+            openProgress: 1 - root.offsetScale
         }
     }
 }

@@ -14,6 +14,8 @@ MouseArea {
 
     required property LazyLoader loader
     required property ShellScreen screen
+    // Alias for the selection border rect; its id is shadowed inside sibling Rectangles
+    readonly property Item selectionBorder: border
 
     property bool onClient
 
@@ -226,8 +228,8 @@ MouseArea {
         id: overlay
 
         anchors.fill: parent
-        color: Colours.palette.m3secondaryContainer
-        opacity: 0.3
+        color: Colours.palette.m3scrim
+        opacity: 0.4
 
         layer.enabled: true
         layer.effect: Mask {
@@ -270,6 +272,21 @@ MouseArea {
         Behavior on border.color {
             CAnim {}
         }
+    }
+
+    Rectangle {
+        id: borderHalo
+
+        color: "transparent"
+        radius: root.selectionBorder.radius + 3
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3primary, 0.35)
+        visible: root.selectionBorder.visible
+
+        x: root.selectionBorder.x - 3
+        y: root.selectionBorder.y - 3
+        implicitWidth: root.selectionBorder.implicitWidth + 6
+        implicitHeight: root.selectionBorder.implicitHeight + 6
     }
 
     Behavior on opacity {

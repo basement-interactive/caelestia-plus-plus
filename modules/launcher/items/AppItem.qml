@@ -12,13 +12,52 @@ Item {
 
     required property DesktopEntry modelData
     required property ScreenState screenState
+    required property int index
 
     implicitHeight: Tokens.sizes.launcher.itemHeight
 
     anchors.left: parent?.left
     anchors.right: parent?.right
 
+    opacity: 0
+    scale: pressLayer.pressed ? 0.97 : 1
+    transform: Translate {
+        id: enterSlide
+
+        y: Tokens.padding.large
+    }
+
+    SequentialAnimation {
+        running: true
+
+        PauseAnimation {
+            duration: Math.min(root.index, 10) * 30
+        }
+        ParallelAnimation {
+            Anim {
+                target: root
+                property: "opacity"
+                to: 1
+                type: Anim.DefaultEffects
+            }
+            Anim {
+                target: enterSlide
+                property: "y"
+                to: 0
+                type: Anim.DefaultSpatial
+            }
+        }
+    }
+
+    Behavior on scale {
+        Anim {
+            type: pressLayer.pressed ? Anim.FastSpatial : Anim.Emphasized
+        }
+    }
+
     StateLayer {
+        id: pressLayer
+
         radius: Tokens.rounding.large
         onClicked: {
             Apps.launch(root.modelData);

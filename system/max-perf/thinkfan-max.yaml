@@ -1,0 +1,23 @@
+# Max-perf fan curve: the CPU is allowed to pull ~50W, so the fans run ahead
+# of the heat instead of chasing it — and audibly so, as proof the mode is
+# engaged. Level 5 is the floor the moment the mode turns on; the EC's max
+# regulated level (7) by 42C; above 48C the rpm cap is dropped entirely
+# ("disengaged", ~4500-5000rpm, an EC-supported mode the fan is rated for).
+# Strictly louder than bed-mode's curve at every temperature.
+#
+# Only active while thinkfan-max.service is running; max-perf leaves it
+# stopped otherwise so the EC's automatic curve takes back over.
+
+sensors:
+  - hwmon: /sys/class/hwmon
+    name: k10temp
+    indices: [1] # Tctl
+
+fans:
+  - tpacpi: /proc/acpi/ibm/fan
+
+levels:
+  - [5, 0, 36]
+  - [6, 34, 44]
+  - [7, 42, 52]
+  - ["level disengaged", 48, 32767]

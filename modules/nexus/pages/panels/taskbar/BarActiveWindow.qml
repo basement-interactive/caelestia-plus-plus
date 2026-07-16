@@ -30,18 +30,11 @@ PageBase {
         }
 
         ToggleRow {
+            last: true
             text: qsTr("Show on hover")
             subtext: qsTr("Only show the active window title while hovering")
             checked: Config.bar.activeWindow.showOnHover
             onToggled: GlobalConfig.bar.activeWindow.showOnHover = checked
-        }
-
-        ToggleRow {
-            last: true
-            text: qsTr("Popout on hover")
-            subtext: qsTr("Show a window details popout when hovering")
-            checked: Config.bar.popouts.activeWindow
-            onToggled: GlobalConfig.bar.popouts.activeWindow = checked
         }
     }
 }

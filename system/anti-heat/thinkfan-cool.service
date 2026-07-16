@@ -1,0 +1,11 @@
+[Unit]
+Description=thinkfan - anti-heat early fan curve
+Documentation=man:thinkfan(1) man:thinkfan.conf(5)
+ConditionPathExists=/etc/thinkfan-cool.yaml
+Conflicts=thinkfan-bed.service thinkfan-max.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/thinkfan -n -q -c /etc/thinkfan-cool.yaml
+Restart=on-failure
+RestartSec=2

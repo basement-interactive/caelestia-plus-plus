@@ -1,0 +1,27 @@
+# Anti-heat fan curve: start moving air EARLY instead of letting the EC sit
+# on its hands until ~75-80C. Deliberately gentler than bed-mode (level 7
+# only from 70C vs bed's 56C) — the undervolt does most of the work, the
+# fans just stop heat from accumulating in the first place. Levels 1-3 are
+# near-inaudible on this chassis.
+#
+# Only active while thinkfan-cool.service is running; it yields to the
+# bed/max curves (Conflicts=) and the EC's automatic curve takes over
+# whenever it is stopped.
+
+sensors:
+  - hwmon: /sys/class/hwmon
+    name: k10temp
+    indices: [1] # Tctl
+
+fans:
+  - tpacpi: /proc/acpi/ibm/fan
+
+levels:
+  - [0, 0, 42]
+  - [1, 40, 48]
+  - [2, 46, 54]
+  - [3, 52, 60]
+  - [4, 58, 66]
+  - [5, 64, 72]
+  - [7, 70, 78]
+  - ["level disengaged", 76, 32767]

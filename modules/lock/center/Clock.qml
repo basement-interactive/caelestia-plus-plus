@@ -16,6 +16,26 @@ Item {
 
     implicitWidth: hours.implicitWidth + minutes.implicitWidth + Tokens.spacing.small
     implicitHeight: hourMetrics.tightBoundingRect.height
+    // Idle accent: gentle breath, gated on the lock surface being visible
+    SequentialAnimation {
+        loops: Animation.Infinite
+        running: root.visible
+
+        NumberAnimation {
+            target: root
+            property: "opacity"
+            to: 0.85
+            duration: 3000
+            easing.type: Easing.InOutSine
+        }
+        NumberAnimation {
+            target: root
+            property: "opacity"
+            to: 1
+            duration: 3000
+            easing.type: Easing.InOutSine
+        }
+    }
 
     StyledText {
         id: hours

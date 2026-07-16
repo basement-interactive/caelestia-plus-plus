@@ -52,6 +52,8 @@ StyledRect {
 
     onCheckedChanged: internalChecked = checked
 
+    property real pressScale: 0.97
+
     radius: {
         if (radiusMorph && pressed)
             return pressedRadius;
@@ -62,6 +64,7 @@ StyledRect {
         return defaultRadius;
     }
     color: type === ButtonBase.Text ? "transparent" : disabled ? disabledColour : internalChecked ? activeColour : inactiveColour
+    scale: pressed ? pressScale : 1
 
     // Make size required so we don't forget to set it
     required implicitWidth
@@ -90,6 +93,12 @@ StyledRect {
     Behavior on shapeMorphExpansion {
         Anim {
             type: Anim.FastSpatial
+        }
+    }
+
+    Behavior on scale {
+        Anim {
+            type: root.pressed ? Anim.FastSpatial : Anim.Emphasized
         }
     }
 }

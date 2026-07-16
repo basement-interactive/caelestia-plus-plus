@@ -1,0 +1,9 @@
+[Unit]
+Description=Max-perf power plan applier (re-applies every 5s to beat the EC)
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/max-perf-apply run
+ExecStopPost=/usr/local/bin/max-perf-apply restore
+Restart=on-failure
+RestartSec=2

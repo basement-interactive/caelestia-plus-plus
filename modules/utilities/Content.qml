@@ -28,6 +28,13 @@ Item {
             id: idleInhibit
 
             objectName: "utilitiesKeepAwake"
+
+            opacity: 0
+            transform: Translate {
+                id: idleEnter
+
+                y: Tokens.padding.medium
+            }
         }
 
         Record {
@@ -38,6 +45,13 @@ Item {
             props: root.props
             screenState: root.screenState
             z: 1
+
+            opacity: 0
+            transform: Translate {
+                id: recordEnter
+
+                y: Tokens.padding.medium
+            }
         }
 
         Toggles {
@@ -47,6 +61,74 @@ Item {
 
             screenState: root.screenState
             popouts: root.popouts
+
+            opacity: 0
+            transform: Translate {
+                id: togglesEnter
+
+                y: Tokens.padding.medium
+            }
+        }
+    }
+
+    // Staggered one-shot entrance for the three cards
+    SequentialAnimation {
+        running: true
+
+        ParallelAnimation {
+            Anim {
+                target: idleInhibit
+                property: "opacity"
+                to: 1
+                type: Anim.DefaultEffects
+            }
+            Anim {
+                target: idleEnter
+                property: "y"
+                to: 0
+            }
+        }
+    }
+
+    SequentialAnimation {
+        running: true
+
+        PauseAnimation {
+            duration: 40
+        }
+        ParallelAnimation {
+            Anim {
+                target: record
+                property: "opacity"
+                to: 1
+                type: Anim.DefaultEffects
+            }
+            Anim {
+                target: recordEnter
+                property: "y"
+                to: 0
+            }
+        }
+    }
+
+    SequentialAnimation {
+        running: true
+
+        PauseAnimation {
+            duration: 80
+        }
+        ParallelAnimation {
+            Anim {
+                target: toggles
+                property: "opacity"
+                to: 1
+                type: Anim.DefaultEffects
+            }
+            Anim {
+                target: togglesEnter
+                property: "y"
+                to: 0
+            }
         }
     }
 

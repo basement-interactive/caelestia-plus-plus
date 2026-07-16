@@ -1,0 +1,22 @@
+[Unit]
+Description=Redwall per-application outbound firewall
+Documentation=file:///opt/redwall/README.md
+After=network-pre.target nftables.service
+Wants=network-pre.target
+
+[Service]
+Type=simple
+# /run/redwall (socket) and /var/lib/redwall (rules), created and owned by root.
+RuntimeDirectory=redwall
+RuntimeDirectoryMode=0755
+StateDirectory=redwall
+# Load the kernel ruleset before the daemon binds the queue, and always tear it
+# down afterwards so a stopped service means normal, unfiltered networking.
+ExecStartPre=/usr/bin/nft -f /etc/redwall/redwall.nft
+ExecStart=/opt/redwall/venv/bin/python /opt/redwall/redwalld.py --ui-gid __UIGID__
+ExecStopPost=-/usr/bin/nft delete table inet redwall
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

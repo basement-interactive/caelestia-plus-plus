@@ -24,6 +24,19 @@ StyledRect {
     color: Colours.tPalette.m3surfaceContainer
     radius: Tokens.rounding.full
 
+    border.width: 1
+    border.color: {
+        if (lock.pam.buffer)
+            return Qt.alpha(Colours.palette.m3primary, 0.5);
+        if (activeFocus)
+            return Qt.alpha(Colours.palette.m3primary, 0.3);
+        return Qt.alpha(Colours.palette.m3outlineVariant, 0.35);
+    }
+
+    Behavior on border.color {
+        CAnim {}
+    }
+
     focus: true
     onActiveFocusChanged: {
         if (!activeFocus)

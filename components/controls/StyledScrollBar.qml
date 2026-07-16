@@ -62,7 +62,7 @@ ScrollBar {
             return 0;
         }
         radius: Tokens.rounding.full
-        color: Colours.palette.m3secondary
+        color: fullMouse.pressed ? Colours.palette.m3primary : Colours.palette.m3secondary
 
         MouseArea {
             id: mouse

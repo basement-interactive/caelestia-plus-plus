@@ -15,6 +15,7 @@ RowLayout {
     required property int activeWsId
     required property var occupied
     required property int groupOffset
+    property int hoveredWs: -1
 
     readonly property bool isWorkspace: true // Flag for finding workspace children
     // Unanimated prop for others to use as reference
@@ -33,6 +34,14 @@ RowLayout {
         id: indicator
 
         Layout.alignment: Qt.AlignVCenter
+
+        scale: root.hoveredWs === root.ws ? 1.25 : 1
+
+        Behavior on scale {
+            Anim {
+                type: Anim.FastSpatial
+            }
+        }
 
         animate: true
         text: {

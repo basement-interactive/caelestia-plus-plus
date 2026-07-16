@@ -16,11 +16,24 @@ StyledRect {
     required property real usage
     required property real temperature
 
-    color: Colours.tPalette.m3surfaceContainer
+    color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
     radius: Tokens.rounding.extraLarge
 
     implicitWidth: Tokens.sizes.dashboard.perfHeroCardWidth
     implicitHeight: Math.max(tempProg.implicitHeight + detailsRow.implicitHeight + Tokens.spacing.large, usageShape.implicitHeight + usageLabel.implicitHeight) + Tokens.padding.large * 2
+
+    Behavior on border.color {
+        CAnim {}
+    }
+
+    StyledRect {
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.extraSmall
+        radius: Math.max(0, root.radius - anchors.margins)
+        color: Colours.tPalette.m3surfaceContainer
+    }
 
     CircularProgress {
         id: tempProg

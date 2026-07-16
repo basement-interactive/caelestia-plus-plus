@@ -173,20 +173,29 @@ Item {
             }
             PropertyAction {
                 target: wrapper
-                property: "implicitHeight"
-                value: 0
-            }
-            PropertyAction {
-                target: wrapper
                 property: "z"
                 value: 1
             }
-            Anim {
-                target: notif
-                property: "x"
-                to: (notif.x >= 0 ? root.implicitWidth : -root.implicitWidth) * 2
-                duration: Tokens.anim.durations.normal
-                easing: Tokens.anim.emphasized
+            ParallelAnimation {
+                Anim {
+                    target: notif
+                    property: "x"
+                    to: (notif.x >= 0 ? root.implicitWidth : -root.implicitWidth) * 2
+                    duration: Tokens.anim.durations.normal
+                    easing: Tokens.anim.emphasizedAccel
+                }
+                Anim {
+                    target: notif
+                    property: "opacity"
+                    to: 0
+                    duration: Tokens.anim.durations.normal
+                    easing: Tokens.anim.standard
+                }
+                Anim {
+                    target: wrapper
+                    property: "implicitHeight"
+                    to: 0
+                }
             }
             PropertyAction {
                 target: wrapper

@@ -1,0 +1,9 @@
+[Unit]
+Description=Anti-heat undervolt applier (re-applies every 30s, survives suspend resets)
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/anti-heat-apply run
+ExecStopPost=/usr/local/bin/anti-heat-apply restore
+Restart=on-failure
+RestartSec=2

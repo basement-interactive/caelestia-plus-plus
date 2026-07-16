@@ -69,6 +69,7 @@ Item {
                     id: cpuCard
 
                     active: Config.dashboard.performance.showCpu
+                    stagger: 0
 
                     sourceComponent: HeroCard {
                         icon: "memory"
@@ -88,6 +89,7 @@ Item {
                     id: gpuCard
 
                     active: Config.dashboard.performance.showGpu && Gpu.type !== Gpu.None
+                    stagger: 1
 
                     sourceComponent: HeroCard {
                         icon: "desktop_windows"
@@ -112,6 +114,7 @@ Item {
                     id: storageCard
 
                     active: Config.dashboard.performance.showStorage
+                    stagger: 2
                     sourceComponent: StorageCard {}
                 }
 
@@ -119,6 +122,7 @@ Item {
                     id: networkCard
 
                     active: Config.dashboard.performance.showNetwork
+                    stagger: 3
                     sourceComponent: NetworkCard {}
                 }
 
@@ -126,6 +130,7 @@ Item {
                     id: memoryCard
 
                     active: Config.dashboard.performance.showMemory
+                    stagger: 4
                     sourceComponent: MemoryCard {}
                 }
             }
@@ -134,13 +139,46 @@ Item {
         WrappedLoader {
             Layout.fillWidth: false
             active: UPower.displayDevice.isLaptopBattery && Config.dashboard.performance.showBattery
+            stagger: 5
             sourceComponent: BatteryTank {}
         }
     }
 
     component WrappedLoader: Loader {
+        id: loader
+
+        property int stagger: 0
+        property real revealOffset: Tokens.padding.large
+
         Layout.fillWidth: true
         Layout.fillHeight: true
         visible: active
+        opacity: 0
+
+        transform: Translate {
+            y: loader.revealOffset
+        }
+
+        SequentialAnimation {
+            running: loader.status === Loader.Ready
+
+            PauseAnimation {
+                duration: loader.stagger * 40
+            }
+            ParallelAnimation {
+                Anim {
+                    target: loader
+                    property: "opacity"
+                    to: 1
+                    type: Anim.DefaultEffects
+                }
+                Anim {
+                    target: loader
+                    property: "revealOffset"
+                    to: 0
+                    type: Anim.DefaultSpatial
+                }
+            }
+        }
     }
 }

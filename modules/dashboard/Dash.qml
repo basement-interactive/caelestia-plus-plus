@@ -1,4 +1,5 @@
 import "dash"
+import QtQuick
 import QtQuick.Layouts
 import Caelestia.Config
 import qs.components
@@ -15,6 +16,8 @@ GridLayout {
     columnSpacing: Tokens.spacing.medium
 
     Rect {
+        stagger: 1
+
         Layout.column: 2
         Layout.columnSpan: 3
         Layout.preferredWidth: Tokens.sizes.dashboard.userWidth
@@ -31,6 +34,8 @@ GridLayout {
     }
 
     Rect {
+        stagger: 0
+
         Layout.row: 0
         Layout.columnSpan: 2
         Layout.preferredWidth: Tokens.sizes.dashboard.weatherWidth
@@ -44,6 +49,8 @@ GridLayout {
     }
 
     Rect {
+        stagger: 3
+
         Layout.row: 1
         Layout.preferredWidth: dateTime.implicitWidth
         Layout.fillHeight: true
@@ -56,6 +63,8 @@ GridLayout {
     }
 
     Rect {
+        stagger: 4
+
         Layout.row: 1
         Layout.column: 1
         Layout.columnSpan: 3
@@ -72,6 +81,8 @@ GridLayout {
     }
 
     Rect {
+        stagger: 5
+
         Layout.row: 1
         Layout.column: 4
         Layout.preferredWidth: resources.implicitWidth
@@ -85,6 +96,8 @@ GridLayout {
     }
 
     Rect {
+        stagger: 2
+
         Layout.row: 0
         Layout.column: 5
         Layout.rowSpan: 2
@@ -99,6 +112,51 @@ GridLayout {
     }
 
     component Rect: StyledRect {
-        color: Colours.tPalette.m3surfaceContainer
+        id: card
+
+        property int stagger: 0
+        property real revealOffset: Tokens.padding.large
+
+        color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+        opacity: 0
+        transform: Translate {
+            y: card.revealOffset
+        }
+
+        Behavior on border.color {
+            CAnim {}
+        }
+
+        StyledRect {
+            anchors.fill: parent
+            anchors.margins: Tokens.padding.extraSmall
+            radius: Math.max(0, card.radius - anchors.margins)
+            color: Colours.tPalette.m3surfaceContainer
+        }
+
+        SequentialAnimation {
+            running: true
+
+            PauseAnimation {
+                duration: card.stagger * 40
+            }
+            ParallelAnimation {
+                Anim {
+                    target: card
+                    property: "opacity"
+                    to: 1
+                    type: Anim.DefaultEffects
+                }
+                Anim {
+                    target: card
+                    property: "revealOffset"
+                    to: 0
+                    type: Anim.DefaultSpatial
+                }
+            }
+        }
     }
 }

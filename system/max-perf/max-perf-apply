@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# The "insane" half of max-perf mode. Run by max-perf.service while the mode
+# is on; re-applies everything every 5s because the EC (lap-mode sensing,
+# profile changes) silently claws limits back if it is set only once.
+#
+#   run      loop forever, re-applying the performance plan (default)
+#   restore  put every knob back to its everyday value (service ExecStopPost)
+#
+# Safety posture (deliberate, do not "improve" away):
+#   - Tctl targets sit below the silicon's 100C hard limit, so the SMU still
+#     throttles with margin; firmware thermal shutdown is untouched.
+#   - On battery the power limits drop to a battery-safe tier: a 50W package
+#     sustained from a 7735U hammers discharge current and battery wear.
+#   - VRM/current limits are never touched.
+#   - Fan control failing open is fine: the EC's automatic curve keeps
+#     running whenever thinkfan-max is not active.
+#
+# Knobs, in order of impact on this machine (Ryzen 7 PRO 7735U / 680M):
+#   ryzenadj            AC: STAPM 42W / fast 50W / slow 45W / Tctl 95
+#                       battery: 30 / 35 / 32 W / Tctl 90
+#                       + SMU max-performance mode (stock STAPM is 28W)
+#   scaling_governor    performance = P-states pinned high (EPP ignored)
+#   cpufreq boost       on
+#   platform_profile    performance (ThinkPad ACPI)
+#   power profile       performance (power-profiles-daemon)
+#   amdgpu dpm level    high = iGPU clocks pinned instead of ramping
+set -u
+
+on_ac() {
+    local online
+    for online in /sys/class/power_supply/*/online; do
+        [[ "$(cat "$online" 2>/dev/null)" == "1" ]] && return 0
+    done
+    return 1
+}
+# Journal-visible state transitions only (no 5s spam): logs once when the
+# limits start applying and once when they stop working. ryzenadj can fail
+# WITHOUT the /dev/mem path (IO_STRICT_DEVMEM kernels) — the ryzen_smu
+# kernel module is required then; never let that failure be silent again.
+ryz_state=""
+
+apply_limits() {
+    local args out
+    if on_ac; then
+        args=(--stapm-limit=42000 --fast-limit=50000 --slow-limit=45000 --tctl-temp=95)
+    else
+        args=(--stapm-limit=30000 --fast-limit=35000 --slow-limit=32000 --tctl-temp=90)
+    fi
+    out=$(ryzenadj "${args[@]}" --max-performance 2>&1)
+    if [[ $? -ne 0 || "$out" =~ [Ff]ail|[Uu]nable|[Ee]rror ]]; then
+        if [[ "$ryz_state" != failed ]]; then
+            echo "ryzenadj FAILED — power limits NOT applied (is ryzen_smu loaded?): ${out:0:300}" >&2
+            ryz_state=failed
+        fi
+    elif [[ "$ryz_state" != ok ]]; then
+        echo "ryzenadj limits applied: ${args[*]}"
+        ryz_state=ok
+    fi
+}
+
+apply() {
+    apply_limits
+    for p in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
+        echo performance > "$p" 2>/dev/null || true
+    done
+    echo 1 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+    echo performance > /sys/firmware/acpi/platform_profile 2>/dev/null || true
+    powerprofilesctl set performance 2>/dev/null || true
+    for g in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
+        echo high > "$g" 2>/dev/null || true
+    done
+}
+
+restore() {
+    powerprofilesctl set balanced 2>/dev/null || true
+    for p in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
+        echo powersave > "$p" 2>/dev/null || true
+    done
+    for g in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
+        echo auto > "$g" 2>/dev/null || true
+    done
+    # No ryzenadj restore on purpose: the EC re-imposes its own limits within
+    # seconds once we stop re-applying, which IS the stock behaviour.
+}
+
+case "${1:-run}" in
+restore)
+    restore
+    ;;
+run)
+    while :; do
+        apply
+        sleep 5
+    done
+    ;;
+*)
+    echo "usage: $0 [run|restore]" >&2
+    exit 1
+    ;;
+esac

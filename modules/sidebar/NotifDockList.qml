@@ -66,7 +66,7 @@ LazyListView {
             implicitHeight: notifInner.implicitHeight
 
             opacity: LazyListView.removing || closed || LazyListView.adding ? 0 : 1
-            scale: LazyListView.removing || closed ? 0.6 : LazyListView.adding ? 0 : 1
+            scale: LazyListView.removing || closed ? 0.6 : LazyListView.adding ? 0 : notif.pressed ? 0.98 : 1
 
             hoverEnabled: true
             cursorShape: pressed ? Qt.ClosedHandCursor : undefined

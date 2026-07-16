@@ -68,7 +68,20 @@ Item {
             implicitHeight: bigInfoRow.implicitHeight + Tokens.padding.small
 
             radius: Tokens.rounding.extraLarge * 2
-            color: Colours.tPalette.m3surfaceContainer
+            color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
+            border.width: 1
+            border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+            Behavior on border.color {
+                CAnim {}
+            }
+
+            StyledRect {
+                anchors.fill: parent
+                anchors.margins: Tokens.padding.extraSmall
+                radius: Math.max(0, parent.radius - anchors.margins)
+                color: Colours.tPalette.m3surfaceContainer
+            }
 
             RowLayout {
                 id: bigInfoRow
@@ -155,8 +168,50 @@ Item {
                     Layout.fillWidth: true
                     implicitHeight: forecastItemColumn.implicitHeight + Tokens.padding.medium * 2
 
+                    property real revealOffset: Tokens.padding.large
+
                     radius: Tokens.rounding.large
-                    color: Colours.tPalette.m3surfaceContainer
+                    color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
+                    border.width: 1
+                    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+                    opacity: 0
+
+                    transform: Translate {
+                        y: forecastItem.revealOffset
+                    }
+
+                    Behavior on border.color {
+                        CAnim {}
+                    }
+
+                    SequentialAnimation {
+                        running: true
+
+                        PauseAnimation {
+                            duration: forecastItem.index * 40
+                        }
+                        ParallelAnimation {
+                            Anim {
+                                target: forecastItem
+                                property: "opacity"
+                                to: 1
+                                type: Anim.DefaultEffects
+                            }
+                            Anim {
+                                target: forecastItem
+                                property: "revealOffset"
+                                to: 0
+                                type: Anim.DefaultSpatial
+                            }
+                        }
+                    }
+
+                    StyledRect {
+                        anchors.fill: parent
+                        anchors.margins: Tokens.padding.extraSmall
+                        radius: Math.max(0, parent.radius - anchors.margins)
+                        color: Colours.tPalette.m3surfaceContainer
+                    }
 
                     ColumnLayout {
                         id: forecastItemColumn
@@ -214,7 +269,20 @@ Item {
         Layout.fillWidth: true
         Layout.preferredHeight: 60
         radius: Tokens.rounding.medium
-        color: Colours.tPalette.m3surfaceContainer
+        color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
+        border.width: 1
+        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+        Behavior on border.color {
+            CAnim {}
+        }
+
+        StyledRect {
+            anchors.fill: parent
+            anchors.margins: Tokens.padding.extraSmall
+            radius: Math.max(0, parent.radius - anchors.margins)
+            color: Colours.tPalette.m3surfaceContainer
+        }
 
         Row {
             anchors.centerIn: parent

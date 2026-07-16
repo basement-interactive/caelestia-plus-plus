@@ -119,6 +119,13 @@ ColumnLayout {
                 text: kbDelegate.label
                 elide: Text.ElideRight
                 opacity: kbDelegate.isDisabled ? 0.4 : 1.0
+                scale: layer.pressed && !kbDelegate.isDisabled ? 0.97 : 1
+
+                Behavior on scale {
+                    Anim {
+                        type: Anim.FastSpatial
+                    }
+                }
             }
         }
     }

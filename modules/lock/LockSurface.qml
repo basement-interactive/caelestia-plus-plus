@@ -193,11 +193,21 @@ WlSessionLockSurface {
             radius: parent.radius
             opacity: Colours.transparency.enabled ? Colours.transparency.base : 1
 
+            border.width: 1
+            border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
             layer.enabled: true
             layer.effect: MultiEffect {
                 shadowEnabled: true
                 blurMax: 15
                 shadowColor: Qt.alpha(Colours.palette.m3shadow, 0.7)
+            }
+
+            StyledRect {
+                anchors.fill: parent
+                anchors.margins: Tokens.padding.small
+                radius: Math.max(0, lockBg.radius - Tokens.padding.small)
+                color: Qt.alpha(Colours.palette.m3surfaceContainerLow, 0.4)
             }
         }
 

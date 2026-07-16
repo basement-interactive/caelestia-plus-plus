@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync Dynamic power mode to the caelestia toggle state
+After=power-profiles-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/dynamic-sync
+
+[Install]
+WantedBy=multi-user.target

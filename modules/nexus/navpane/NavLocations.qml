@@ -52,6 +52,35 @@ VerticalFadeFlickable {
 
                 color: isCurrentPage ? Colours.palette.m3secondaryContainer : Colours.layer(Colours.palette.m3surfaceContainerHigh, 2)
 
+                opacity: 0
+                transform: Translate {
+                    id: enterTrans
+
+                    y: 8
+                }
+
+                // One-shot staggered entrance
+                SequentialAnimation {
+                    running: true
+
+                    PauseAnimation {
+                        duration: Math.min(item.index * 30, 360)
+                    }
+                    ParallelAnimation {
+                        Anim {
+                            target: item
+                            property: "opacity"
+                            to: 1
+                            type: Anim.DefaultEffects
+                        }
+                        Anim {
+                            target: enterTrans
+                            property: "y"
+                            to: 0
+                        }
+                    }
+                }
+
                 topLeftRadius: stateLayer.pressed ? Tokens.rounding.medium : isCurrentPage ? Tokens.rounding.extraLargeIncreased : isCategoryStart ? Tokens.rounding.extraLarge : Tokens.rounding.extraSmall
                 topRightRadius: stateLayer.pressed ? Tokens.rounding.medium : isCurrentPage ? Tokens.rounding.extraLargeIncreased : isCategoryStart ? Tokens.rounding.extraLarge : Tokens.rounding.extraSmall
                 bottomLeftRadius: stateLayer.pressed ? Tokens.rounding.medium : isCurrentPage ? Tokens.rounding.extraLargeIncreased : isCategoryEnd ? Tokens.rounding.extraLarge : Tokens.rounding.extraSmall

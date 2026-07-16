@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Reconciles anti-heat with the toggle state written by caelestia's features
+# menu (services/AntiHeat.qml). Run by anti-heat-sync.service, triggered by
+# anti-heat-sync.path on every write to the state file, and once at boot to
+# catch a state left over from before shutdown.
+#
+# ON:  start the undervolt applier loop; it brings up thinkfan-cool itself
+#      (and re-acquires the fan whenever bed/max mode releases it).
+# OFF: stop both; anti-heat.service's ExecStopPost restores the stock curve.
+set -euo pipefail
+
+state_file=/home/john/.local/state/caelestia/anti-heat
+state=$(cat "$state_file" 2>/dev/null || true)
+
+if [[ "$state" == "1" ]]; then
+    systemctl start anti-heat.service
+else
+    systemctl stop anti-heat.service 2>/dev/null || true
+    systemctl stop thinkfan-cool.service 2>/dev/null || true
+fi

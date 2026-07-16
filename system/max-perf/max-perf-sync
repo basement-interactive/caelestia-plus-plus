@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Reconciles max-perf with the toggle state written by caelestia's features
+# menu (services/MaxPerf.qml). Run by max-perf-sync.service, which is
+# triggered by max-perf-sync.path on every write to the state file, and once
+# at boot to catch a state left over from before shutdown.
+#
+# ON:  start the 5s power-plan applier loop + the aggressive fan curve.
+#      Bed-mode's fan service is stopped defensively: two thinkfan instances
+#      fighting over /proc/acpi/ibm/fan would flap the fan level.
+# OFF: stop both; max-perf.service's ExecStopPost restores every knob.
+set -euo pipefail
+
+state_file=/home/john/.local/state/caelestia/max-perf
+state=$(cat "$state_file" 2>/dev/null || true)
+
+if [[ "$state" == "1" ]]; then
+    systemctl stop thinkfan-bed.service 2>/dev/null || true
+    systemctl start max-perf.service
+    systemctl start thinkfan-max.service
+else
+    systemctl stop thinkfan-max.service 2>/dev/null || true
+    systemctl stop max-perf.service 2>/dev/null || true
+fi

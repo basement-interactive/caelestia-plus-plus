@@ -26,16 +26,27 @@ StyledClippingRect {
     readonly property int groupOffset: Math.floor((activeWsId - 1) / Config.bar.workspaces.shown) * Config.bar.workspaces.shown
 
     property real blur: onSpecial ? 1 : 0
+    property int hoveredWs: -1
 
     implicitWidth: layout.implicitWidth + Tokens.padding.small
     implicitHeight: Tokens.sizes.bar.innerWidth
 
-    color: Colours.tPalette.m3surfaceContainer
+    color: Qt.alpha(Colours.tPalette.m3surfaceContainer, Colours.tPalette.m3surfaceContainer.a * 0.7)
     radius: Tokens.rounding.full
+    border.width: 1
+    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+    // Double-bezel: inner core nested inside the hairlined shell
+    StyledRect {
+        anchors.fill: parent
+        anchors.margins: Tokens.padding.extraSmall / 2
+        radius: root.radius
+        color: Qt.alpha(Colours.tPalette.m3surfaceContainerHigh, Colours.tPalette.m3surfaceContainerHigh.a * 0.85)
+    }
 
     Item {
         anchors.fill: parent
-        scale: root.onSpecial ? 0.8 : 1
+        scale: root.onSpecial ? 0.8 : wsMouse.pressed ? 0.97 : 1
         opacity: root.onSpecial ? 0.5 : 1
         visible: !root.fullscreen
 
@@ -75,6 +86,7 @@ StyledClippingRect {
                     activeWsId: root.activeWsId
                     occupied: root.occupied
                     groupOffset: root.groupOffset
+                    hoveredWs: root.hoveredWs
                 }
             }
         }
@@ -93,7 +105,12 @@ StyledClippingRect {
         }
 
         MouseArea {
+            id: wsMouse
+
             anchors.fill: layout
+            hoverEnabled: true
+            onPositionChanged: event => root.hoveredWs = (layout.childAt(event.x, event.y) as Workspace)?.ws ?? -1
+            onExited: root.hoveredWs = -1
             onClicked: event => {
                 const ws = (layout.childAt(event.x, event.y) as Workspace)?.ws;
                 if (!ws)

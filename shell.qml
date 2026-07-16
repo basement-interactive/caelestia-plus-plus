@@ -9,6 +9,8 @@ import "modules/drawers"
 import "modules/background"
 import "modules/areapicker"
 import "modules/lock"
+import "modules/firewall"
+import "modules/features"
 import QtQuick
 import Quickshell
 import qs.services
@@ -32,6 +34,9 @@ ShellRoot {
     Lock {
         id: lock
     }
+    FirewallPrompt {}
+    FirewallPanel {}
+    FeaturesMenu {}
 
     ConfigToasts {}
     Shortcuts {}

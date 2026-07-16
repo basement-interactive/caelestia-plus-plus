@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# The brain of "Dynamic" power mode. Run by dynamic.service while the mode is
+# on; every tick it picks the best power-profiles-daemon profile for the
+# current situation and applies it.
+#
+#   run      loop forever, re-evaluating and applying (default)
+#   restore  clear the published tier (service ExecStopPost)
+#
+# Scope, on purpose: this ONLY drives `powerprofilesctl set` between the same
+# three profiles the manual battery-menu buttons use (power-saver / balanced /
+# performance). It never touches ryzenadj, the governor, or amdgpu directly,
+# so it can never fight Anti-Heat (owns the thermal/PPT caps) or Max-perf
+# (owns the 50W pin). It is exactly "Eco + Balanced + Performance, automatic".
+#
+# How it decides (see pick_tier):
+#   - CPU load is read from /proc/stat deltas, NOT loadavg: on this box
+#     loadavg is heavily I/O-inflated (zram swap, media I/O) and would pin the
+#     machine to performance while it is actually idle. iowait is excluded
+#     from "busy" for the same reason.
+#   - Per-core peak is tracked too, so a single pegged thread (latency-
+#     sensitive single-threaded work) escalates instantly even though its
+#     share of 16 threads is a small aggregate number.
+#   - Hysteresis: escalate UP immediately (snappy), step DOWN one tier only
+#     after DOWN_TICKS of sustained-lower demand (no flapping mid-build).
+set -u
+
+# --- Tunables --------------------------------------------------------------
+TICK=4                 # seconds between evaluations
+AGG_HIGH=30            # aggregate CPU busy % -> real multi-core work, go up
+CORE_HIGH=90           # a single core this pinned -> go up (secondary; the
+                       # scheduler migrates threads across 16 CPUs, so this
+                       # rarely fires — aggregate is the reliable signal here)
+AGG_IDLE=10            # aggregate below this ...
+CORE_IDLE=50           # ... and no core above this -> deep idle, eco eligible
+BAT_CRIT=15            # battery % at/under which we force eco regardless
+DOWN_TICKS=5           # sustained-lower ticks before stepping down a tier
+DRIFT_TICKS=15         # ticks between drift checks (heal external clobbers)
+# ---------------------------------------------------------------------------
+
+STATE_DIR=/home/john/.local/state/caelestia
+MAXPERF_STATE="$STATE_DIR/max-perf"
+BEDMODE_STATE="$STATE_DIR/bed-mode"
+TIER_FILE="$STATE_DIR/dynamic-tier"   # published for the UI to read
+
+TIER_NAMES=(power-saver balanced performance)
+
+# All tiny file reads use $(<f) — bash-builtin, no fork; the loop must stay
+# near-zero CPU since it runs 24/7 at a 4s tick.
+on_ac() {
+    local online
+    for online in /sys/class/power_supply/*/online; do
+        [[ -r "$online" && "$(<"$online")" == "1" ]] && return 0
+    done
+    return 1
+}
+
+battery_pct() {
+    local f
+    for f in /sys/class/power_supply/BAT*/capacity; do
+        [[ -r "$f" ]] && { echo "$(<"$f")"; return; }
+    done
+    echo 100
+}
+
+state_on() { [[ -r "$1" && "$(<"$1")" == "1" ]]; }
+
+# Snapshot per-cpu busy/total from /proc/stat into the passed assoc arrays.
+# Line "cpu " is the aggregate; "cpuN" are individual cores. Busy excludes
+# idle(4) and iowait(5).
+read_cpu() {
+    local -n _busy=$1 _total=$2
+    local cpu rest fields idle iowait tot i
+    while read -r cpu user nice sys idle iowait irq softirq steal guest gnice; do
+        [[ "$cpu" == cpu* ]] || continue
+        tot=$((user+nice+sys+idle+iowait+irq+softirq+steal))
+        _busy["$cpu"]=$((tot-idle-iowait))
+        _total["$cpu"]=$tot
+    done < /proc/stat
+}
+
+# Compute aggregate % and hottest-core % from two snapshots.
+# Sets globals AGG and PEAK.
+delta_util() {
+    local -n pb=$1 pt=$2 cb=$3 ct=$4
+    local k db dt u
+    AGG=0; PEAK=0
+    for k in "${!cb[@]}"; do
+        db=$(( cb[$k] - ${pb[$k]:-0} ))
+        dt=$(( ct[$k] - ${pt[$k]:-0} ))
+        (( dt <= 0 )) && continue
+        u=$(( 100 * db / dt ))
+        if [[ "$k" == cpu ]]; then
+            AGG=$u
+        else
+            (( u > PEAK )) && PEAK=$u
+        fi
+    done
+}
+
+# desired tier (0/1/2) from the sampled state. Args: agg peak
+pick_tier() {
+    local agg=$1 peak=$2 desired ceiling
+    local heavy=0 idle=0
+    (( agg >= AGG_HIGH || peak >= CORE_HIGH )) && heavy=1
+    (( agg < AGG_IDLE && peak < CORE_IDLE )) && idle=1
+
+    if on_ac; then
+        if (( heavy )); then desired=2
+        elif (( idle )); then desired=0
+        else desired=1; fi
+    else
+        if (( $(battery_pct) <= BAT_CRIT )); then desired=0
+        elif (( heavy )); then desired=1     # battery ceiling: balanced
+        elif (( idle )); then desired=0
+        else desired=1; fi
+    fi
+
+    # Bed mode (restricted airflow) clamps the ceiling to balanced.
+    if state_on "$BEDMODE_STATE"; then
+        (( desired > 1 )) && desired=1
+    fi
+    echo "$desired"
+}
+
+publish_tier() {   # $1 = tier name (or "yield"); writes only on change
+    [[ -r "$TIER_FILE" && "$(<"$TIER_FILE")" == "$1" ]] && return
+    echo "$1" > "$TIER_FILE" 2>/dev/null || true
+    chmod 644 "$TIER_FILE" 2>/dev/null || true
+}
+
+# ppd profile via D-Bus directly: powerprofilesctl is a python script that
+# costs ~280ms CPU per spawn; busctl is ~4x cheaper and only runs on change.
+set_profile() {
+    busctl set-property net.hadess.PowerProfiles /net/hadess/PowerProfiles \
+        net.hadess.PowerProfiles ActiveProfile s "$1" 2>/dev/null || true
+}
+
+get_profile() {
+    local out
+    out=$(busctl get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles \
+        net.hadess.PowerProfiles ActiveProfile 2>/dev/null)
+    out=${out#s \"}; echo "${out%\"}"
+}
+
+restore() {
+    rm -f "$TIER_FILE" 2>/dev/null || true
+    # Deliberately do NOT set a profile here: every caller that disables
+    # Dynamic (manual button, Max-perf, Bed mode) sets its own profile right
+    # after, so forcing one here would only race and clobber their choice.
+}
+
+case "${1:-run}" in
+restore)
+    restore
+    ;;
+run)
+    declare -A PB PT CB CT
+    read_cpu PB PT               # prime; first tick has no delta yet
+    current=1                    # start at balanced
+    low_streak=0
+    applied=""                   # last profile actually set (log on change)
+    drift=0
+    yielded=""
+    sleep "$TICK"
+    while :; do
+        # Max-perf owns the whole plan while it is on: stand down entirely.
+        if state_on "$MAXPERF_STATE"; then
+            if [[ "$yielded" != 1 ]]; then
+                echo "max-perf active — Dynamic standing down"
+                publish_tier "yield"
+                yielded=1; applied=""
+            fi
+            sleep "$TICK"; continue
+        fi
+        [[ "$yielded" == 1 ]] && { yielded=""; read_cpu PB PT; sleep "$TICK"; continue; }
+
+        read_cpu CB CT
+        delta_util PB PT CB CT
+        for k in "${!CB[@]}"; do PB[$k]=${CB[$k]}; PT[$k]=${CT[$k]}; done
+
+        desired=$(pick_tier "$AGG" "$PEAK")
+
+        if (( desired > current )); then
+            current=$desired; low_streak=0            # jump up now
+        elif (( desired < current )); then
+            (( low_streak++ ))
+            if (( low_streak >= DOWN_TICKS )); then
+                (( current-- )); low_streak=0          # ease down one step
+            fi
+        else
+            low_streak=0
+        fi
+
+        name=${TIER_NAMES[$current]}
+        if [[ "$applied" != "$name" ]]; then
+            set_profile "$name"
+            publish_tier "$name"
+            echo "dynamic -> $name (agg=${AGG}% peak=${PEAK}% ac=$(on_ac && echo y || echo n) bat=$(battery_pct)%)"
+            applied="$name"
+            drift=0
+        elif (( ++drift >= DRIFT_TICKS )); then
+            # Heal external clobbers (suspend/resume, ppd restart) without
+            # re-spawning a setter every tick.
+            drift=0
+            [[ "$(get_profile)" == "$name" ]] || set_profile "$name"
+        fi
+        sleep "$TICK"
+    done
+    ;;
+*)
+    echo "usage: $0 [run|restore]" >&2
+    exit 1
+    ;;
+esac
