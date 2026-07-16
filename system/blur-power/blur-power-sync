@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Sync Hyprland blur to the power source: frosted glass on AC, flat and
+cool on battery.
+
+Blur over translucent windows costs ~10 GPU percentage points while video
+plays (measured 30.5% -> 20.7% avg on the 680M) and drives max-clock DPM
+bursts, so it is a pure win to drop it when unplugged.
+
+Battery  -> blur off, always.
+AC       -> blur restored to the user's setting (blurEnabled in
+            ~/.config/hypr/variables.lua stays the single source of truth;
+            if the user turns blur off permanently, plugging in respects it).
+
+Triggered by the 90-blur-power udev rule on every power_supply change and
+once at Hyprland startup (execs.lua). Runs fine as root (udev) or as the
+user; talks straight to the Hyprland IPC socket, no environment needed.
+"""
+import glob
+import re
+import socket
+import sys
+
+VARIABLES_LUA = "/home/john/.config/hypr/variables.lua"
+HYPR_SOCKETS = "/run/user/1000/hypr/*/.socket.sock"
+
+
+def on_ac() -> bool:
+    for supply in glob.glob("/sys/class/power_supply/*"):
+        try:
+            if open(f"{supply}/type").read().strip() == "Mains":
+                if open(f"{supply}/online").read().strip() == "1":
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def user_wants_blur() -> bool:
+    try:
+        m = re.search(r"blurEnabled\s*=\s*(true|false)", open(VARIABLES_LUA).read())
+        return m is None or m.group(1) == "true"
+    except OSError:
+        return True
+
+
+def main() -> int:
+    blur = on_ac() and user_wants_blur()
+    cmd = f"eval hl.config({{decoration={{blur={{enabled={str(blur).lower()}}}}}}})"
+    sent = False
+    for path in glob.glob(HYPR_SOCKETS):
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(2)
+            s.connect(path)
+            s.sendall(cmd.encode())
+            if s.recv(64).strip() == b"ok":
+                sent = True
+            s.close()
+        except OSError:
+            continue
+    print(f"blur-power-sync: blur={'on' if blur else 'off'} sent={sent}")
+    return 0 if sent else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

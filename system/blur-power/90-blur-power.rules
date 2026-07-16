@@ -1,0 +1,2 @@
+# Sync Hyprland blur to the power source on every AC plug/unplug.
+SUBSYSTEM=="power_supply", ATTR{type}=="Mains", RUN+="/usr/local/bin/blur-power-sync"
