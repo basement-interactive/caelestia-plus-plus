@@ -43,6 +43,8 @@ StyledRect {
     onCurrentWsIdxChanged: {
         lastWs = cWs;
         cWs = currentWsIdx;
+        if (visible && !fullscreen)
+            glowBreath.restart();
     }
 
     x: offset + mask.x
@@ -61,9 +63,14 @@ StyledRect {
         offset: Qt.vector2d(0, 0)
     }
 
+    // Glow breathes for two cycles after a workspace switch, then rests.
+    // No `running:` binding: a binding on a finite animation re-asserts true
+    // after completion and restarts it forever — the always-on loop it
+    // replaces cost ~4% CPU in constant 60fps bar re-renders.
     SequentialAnimation on glowStrength {
-        running: root.visible && !root.fullscreen
-        loops: Animation.Infinite
+        id: glowBreath
+
+        loops: 2
         alwaysRunToEnd: true
 
         Anim {
