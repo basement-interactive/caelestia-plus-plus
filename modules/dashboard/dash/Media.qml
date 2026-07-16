@@ -31,15 +31,21 @@ Item {
     }
 
     Timer {
-        running: Players.active?.isPlaying ?? false
+        running: root.visible && (Players.active?.isPlaying ?? false)
         interval: GlobalConfig.dashboard.mediaUpdateInterval
         triggeredOnStart: true
         repeat: true
         onTriggered: Players.active?.positionChanged()
     }
 
-    ServiceRef {
-        service: Audio.beatTracker
+    // Resident content: hold the beat-tracker ref only while on screen,
+    // otherwise its FFT runs whenever music plays with the dashboard closed.
+    Loader {
+        active: root.visible
+
+        sourceComponent: ServiceRef {
+            service: Audio.beatTracker
+        }
     }
 
     CircularProgress {

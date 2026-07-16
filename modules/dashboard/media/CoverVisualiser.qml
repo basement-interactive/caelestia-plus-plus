@@ -18,8 +18,15 @@ Item {
     readonly property real spacing: Tokens.spacing.medium
     readonly property real maxMagnitude: (implicitWidth - cover.implicitWidth) / 2 - spacing
 
-    ServiceRef {
-        service: Audio.cava
+    // Hold the cava ref only while actually on screen: the dashboard content
+    // is resident now, and an unconditional ref kept the FFT + 60Hz value
+    // stream (and 40 bars of trig bindings) running whenever music played.
+    Loader {
+        active: root.visible
+
+        sourceComponent: ServiceRef {
+            service: Audio.cava
+        }
     }
 
     Shape {
