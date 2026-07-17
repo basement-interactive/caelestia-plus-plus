@@ -90,6 +90,15 @@ if [[ $readable == 0 ]]; then
     echo ":: granting the current session read access to input devices"
     sudo setfacl -m "u:$USER:r" /dev/input/event* 2>/dev/null || true
 fi
+# A one-shot ACL dies when a device re-enumerates (unplug/replug); the
+# uaccess tag has logind maintain the ACL for the active seat user on every
+# input node, current and future.
+if [[ ! -f /etc/udev/rules.d/70-caelestia-egg.rules ]]; then
+    echo ":: installing udev rule so input access survives hotplug and re-login"
+    echo 'SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-caelestia-egg.rules >/dev/null
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger --subsystem-match=input
+fi
 
 echo ":: fetching the shell"
 if [[ -d $SHELL_DIR/.git ]] && git -C "$SHELL_DIR" remote get-url origin 2>/dev/null | grep -q "$REPO"; then

@@ -41,13 +41,17 @@ def keyboard_event_paths():
     return paths
 
 
-def open_keyboards():
+def open_keyboards(test=False):
     files = []
     for path in keyboard_event_paths():
         try:
             files.append(open(path, "rb", buffering=0))
-        except OSError:
-            pass  # not readable (yet) - picked up on a later rescan
+            if test:
+                print(f"[test] opened {path}", flush=True)
+        except OSError as e:
+            # not readable (yet) - picked up on a later rescan
+            if test:
+                print(f"[test] FAILED to open {path}: {e}", flush=True)
     return files
 
 
@@ -117,10 +121,9 @@ def main(test=False):
     # --test: no lock (runs alongside the live watcher), no pop — prints what
     # the watcher sees so "types but nothing happens" can be diagnosed
     lock = None if test else acquire_single_instance_lock()
-    keyboards = open_keyboards()
+    keyboards = open_keyboards(test)
     if test:
-        print(f"[test] opened {len(keyboards)} keyboard device(s): {[f.name for f in keyboards]}", flush=True)
-        print("[test] type the magic word; Ctrl-C to quit", flush=True)
+        print(f"[test] {len(keyboards)} device(s) open; every keypress prints below. Ctrl-C to quit", flush=True)
     recent = []
     last_scan = time.monotonic()
     last_pop = 0.0
@@ -154,6 +157,8 @@ def main(test=False):
                 _, _, etype, code, value = struct.unpack_from(EVENT_FMT, data, i)
                 if etype != EV_KEY or value != KEY_DOWN:
                     continue
+                if test:
+                    print(f"[test] keydown code={code} {'letter' if code in LETTER_CODES else 'other'} from {f.name}", flush=True)
                 if code not in LETTER_CODES:
                     recent.clear()
                     continue
