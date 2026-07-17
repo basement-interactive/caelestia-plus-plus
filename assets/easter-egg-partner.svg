@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 200" width="240" height="200">
+  <!-- cartoon vulva, same sticker style as easter-egg.svg -->
+  <g stroke="#7a4a2b" stroke-width="7" stroke-linejoin="round">
+    <path d="M120 18 C 62 18 32 78 32 122 C 32 170 76 188 120 188 C 164 188 208 170 208 122 C 208 78 178 18 120 18 Z" fill="#f6c9a3"/>
+    <path d="M120 64 C 106 96 106 138 120 166 C 134 138 134 96 120 64 Z" fill="#e88ba0"/>
+  </g>
+  <circle cx="120" cy="58" r="9" fill="#e88ba0" stroke="#7a4a2b" stroke-width="6"/>
+  <ellipse cx="70" cy="120" rx="12" ry="8" fill="#f0a8a0" opacity="0.6"/>
+  <ellipse cx="170" cy="120" rx="12" ry="8" fill="#f0a8a0" opacity="0.6"/>
+  <ellipse cx="66" cy="60" rx="9" ry="14" fill="#ffffff" opacity="0.4" transform="rotate(18 66 60)"/>
+</svg>

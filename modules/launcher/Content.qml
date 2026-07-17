@@ -132,16 +132,23 @@ Item {
             }
         }
 
-        Component.onCompleted: forceActiveFocus()
+        // Content is preloaded and kept resident (see Wrapper), so the
+        // search field must retake focus on every open, not just on creation
+        Component.onCompleted: {
+            if (root.screenState.launcher)
+                forceActiveFocus();
+        }
 
         Connections {
             function onLauncherChanged(): void {
-                if (!root.screenState.launcher)
+                if (root.screenState.launcher)
+                    search.forceActiveFocus();
+                else
                     search.text = "";
             }
 
             function onSessionChanged(): void {
-                if (!root.screenState.session)
+                if (!root.screenState.session && root.screenState.launcher)
                     search.forceActiveFocus();
             }
 

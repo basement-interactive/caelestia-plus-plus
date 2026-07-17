@@ -37,6 +37,8 @@ Item {
     anchors.fill: parent
     anchors.margins: borderThickness
     anchors.topMargin: bar.implicitHeight
+    // Panels drop from behind the floating bar, not the screen edge
+    clip: true
 
     Item {
         id: osdWrapper

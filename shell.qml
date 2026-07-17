@@ -8,6 +8,7 @@ import "modules"
 import "modules/drawers"
 import "modules/background"
 import "modules/areapicker"
+import "modules/easteregg"
 import "modules/lock"
 import "modules/firewall"
 import "modules/features"
@@ -40,6 +41,7 @@ ShellRoot {
 
     ConfigToasts {}
     Shortcuts {}
+    EasterEgg {}
     BatteryMonitor {}
     IdleMonitors {
         lock: lock

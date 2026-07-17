@@ -25,14 +25,6 @@ StyledRect {
     implicitHeight: Tokens.sizes.bar.innerWidth
     implicitWidth: iconRow.implicitWidth + Tokens.padding.medium * 2 - (Config.bar.status.showLockStatus && !Hypr.capsLock && !Hypr.numLock ? iconRow.spacing : 0)
 
-    // Double-bezel: inner core nested inside the hairlined shell
-    StyledRect {
-        anchors.fill: parent
-        anchors.margins: Tokens.padding.extraSmall / 2
-        radius: root.radius
-        color: Qt.alpha(Colours.tPalette.m3surfaceContainerHigh, Colours.tPalette.m3surfaceContainerHigh.a * 0.85)
-    }
-
     RowLayout {
         id: iconRow
 

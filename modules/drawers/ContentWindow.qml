@@ -42,7 +42,9 @@ StyledWindow {
     readonly property real shadowOpacity: 0.7 * (1 - fsTransitionProg)
     readonly property real borderLayoutThickness: hasFullscreen ? 0 : contentItem.Config.border.thickness
 
-    property color surfaceColour: Colours.tPalette.m3surface
+    // Darkest container tone at the base transparency, so the bar matches
+    // other blurred surfaces (foot terminal etc.) instead of sitting more opaque
+    property color surfaceColour: Qt.alpha(Colours.palette.m3surfaceContainerLowest, Colours.tPalette.m3surface.a)
 
     readonly property int dragMaskPadding: {
         if (focusGrab.active || panels.popouts.isDetached)
@@ -165,15 +167,19 @@ StyledWindow {
             smoothing: root.contentItem.Config.border.smoothing
         }
 
-        BlobInvertedRect {
-            anchors.fill: parent
-            anchors.margins: -50 // Make border thicker to smooth out bulge from closed drawers
+        // Floating bar pill: part of the blob group so popouts and the
+        // dashboard merge into it via SDF smoothing instead of hanging loose.
+        // The left end keeps its full rounding and tucks into the distro
+        // logo's mouth (logoCap in BarWrapper).
+        BlobRect {
             group: blobGroup
-            radius: root.borderRounding
-            borderLeft: root.borderThickness - anchors.margins - root.sdfBorderOffset
-            borderRight: root.borderThickness - anchors.margins - root.sdfBorderOffset
-            borderTop: bar.implicitHeight - anchors.margins - root.sdfBorderOffset
-            borderBottom: root.borderThickness - anchors.margins - root.sdfBorderOffset
+            x: bar.floatMargin + bar.logoInset
+            // Slides up out of view together with the bar hide animation
+            y: bar.implicitHeight - bar.pillHeight
+            implicitWidth: root.width - bar.floatMargin * 2 - bar.logoInset
+            implicitHeight: bar.pillHeight
+            radius: bar.pillHeight / 2
+            deformScale: (0.05 * Config.appearance.deformScale) / 10000
         }
 
         PanelBg {
@@ -242,8 +248,8 @@ StyledWindow {
 
             panel: panels.popoutsWrapper
             deformAmount: panels.popouts.isDetached ? 0.05 : panels.popouts.hasCurrent ? 0.15 : 0.1
-            y: panels.popoutsWrapper.y + panels.popouts.y + bar.implicitHeight - panels.popouts.height * extraHeight
-            implicitHeight: panels.popouts.height * (1 + extraHeight)
+            rawY: panels.popoutsWrapper.y + panels.popouts.y + bar.implicitHeight - panels.popouts.height * extraHeight
+            rawHeight: panels.popouts.height * (1 + extraHeight)
 
             Behavior on extraHeight {
                 Anim {}
@@ -340,12 +346,22 @@ StyledWindow {
     component PanelBg: BlobRect {
         required property Item panel
         property real deformAmount: 0.15
+        // Unclamped geometry; instances may override (popouts overlap the pill)
+        property real rawY: panel.y + bar.implicitHeight
+        // Pill bottom edge; top drop-downs hang below the bar, never over it
+        readonly property real clampY: bar.implicitHeight
+        property real rawHeight: panel.height
 
         group: blobGroup
+        // Closed drawers park just offscreen; `visible: false` alone wouldn't
+        // help — the group renders every registered blob. Visible ones get
+        // their top clamped at the pill's bottom edge so drop-downs unfold
+        // from the bar and stay attached to it (SDF smoothing fillets the
+        // junction) instead of swallowing the pill.
         x: panel.x + root.borderThickness
-        y: panel.y + bar.implicitHeight
+        y: panel.visible ? Math.max(rawY, clampY) : -32000
         implicitWidth: panel.width
-        implicitHeight: panel.height
+        implicitHeight: Math.max(0, rawHeight - (Math.max(rawY, clampY) - rawY))
         radius: Tokens.rounding.extraLarge
         deformScale: (deformAmount * Config.appearance.deformScale) / 10000
 

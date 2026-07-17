@@ -72,7 +72,8 @@ Scope {
             // Sits under the right bar cluster, where the wrench lives.
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.topMargin: Tokens.sizes.bar.innerWidth + Tokens.padding.large * 2
+            // Below the floating bar pill: pill height + its float margins + gap
+            anchors.topMargin: Tokens.sizes.bar.innerWidth + Math.max(Tokens.padding.small, Config.border.thickness) * 2 + Tokens.padding.large * 3
             anchors.rightMargin: Tokens.padding.large * 2
 
             implicitWidth: 380

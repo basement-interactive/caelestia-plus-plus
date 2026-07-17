@@ -11,10 +11,17 @@ Item {
     property int lastPageIdx
     property int animOff
     property Item currentItem
+    property int loadGeneration
 
     function loadPage(idx: int): void {
+        // Incubation is async: a switch can land while the previous page is
+        // still incubating. The generation guard makes that stale incubator
+        // discard its object instead of attaching alongside the new page.
+        const generation = ++loadGeneration;
+
         if (currentItem)
             currentItem.destroy();
+        currentItem = null;
 
         const comp = PageCompRegistry.pageComps[idx] ?? PageCompRegistry.placeholderComp;
         const incubator = comp.incubateObject(container, {
@@ -22,6 +29,10 @@ Item {
         });
 
         const attach = () => {
+            if (generation !== loadGeneration) {
+                incubator.object.destroy();
+                return;
+            }
             incubator.object.anchors.fill = container;
             currentItem = incubator.object;
         };

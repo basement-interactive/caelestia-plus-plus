@@ -46,7 +46,7 @@ QtObject {
         {
             label: qsTr("Updates"),
             icon: "update",
-            description: qsTr("System updates"),
+            description: qsTr("Caelestia++ shell updates"),
             category: "system"
         },
         {

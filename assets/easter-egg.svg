@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 270" width="220" height="270">
+  <!-- cartoon phallus, thick-outline sticker style -->
+  <g stroke="#7a4a2b" stroke-width="7" stroke-linejoin="round">
+    <circle cx="72" cy="216" r="46" fill="#f2bf94"/>
+    <circle cx="148" cy="216" r="46" fill="#f6c9a3"/>
+    <path d="M76 210 Q70 110 84 58 Q92 26 110 26 Q128 26 136 58 Q150 110 144 210 Q110 232 76 210 Z" fill="#f6c9a3"/>
+    <path d="M84 62 Q92 30 110 30 Q128 30 136 62 Q140 78 137 86 Q124 100 96 100 Q86 92 84 78 Z" fill="#e8a179"/>
+  </g>
+  <line x1="110" y1="38" x2="110" y2="52" stroke="#7a4a2b" stroke-width="6" stroke-linecap="round"/>
+  <!-- cartoon vein squiggles -->
+  <g fill="none" stroke="#cf8f83" stroke-width="5" stroke-linecap="round" opacity="0.8">
+    <path d="M92 120 q10 12 2 26 q-8 14 4 26"/>
+    <path d="M124 105 q-10 16 -1 30 q8 13 -2 28 q-8 12 2 24"/>
+    <path d="M104 165 q12 10 8 26"/>
+  </g>
+  <ellipse cx="97" cy="52" rx="7" ry="12" fill="#ffffff" opacity="0.45" transform="rotate(-14 97 52)"/>
+  <ellipse cx="55" cy="200" rx="10" ry="14" fill="#ffffff" opacity="0.35" transform="rotate(-20 55 200)"/>
+</svg>

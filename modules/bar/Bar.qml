@@ -17,7 +17,8 @@ RowLayout {
     required property ScreenState screenState
     required property BarPopouts.Wrapper popouts
     required property bool fullscreen
-    readonly property int hPadding: Tokens.padding.large
+    // Rounded pill ends need extra inset so end items clear the curvature
+    readonly property int hPadding: Tokens.padding.large * 2
 
     function closeTray(): void {
         if (!Config.bar.tray.compact)
@@ -49,7 +50,7 @@ RowLayout {
             const icon = items.childAt(mapToItem(items, x, 0).x, items.height / 2);
             if (icon) {
                 popouts.currentName = icon.name;
-                popouts.currentCenter = Qt.binding(() => icon.mapToItem(root, icon.implicitWidth / 2, 0).x);
+                popouts.currentCenter = Qt.binding(() => icon.mapToItem(null, icon.implicitWidth / 2, 0).x);
                 popouts.hasCurrent = true;
             } else {
                 popouts.hasCurrent = false;
@@ -61,7 +62,7 @@ RowLayout {
                 const trayItem = tray.items.itemAt(index);
                 if (trayItem) {
                     popouts.currentName = `traymenu${index}`;
-                    popouts.currentCenter = Qt.binding(() => trayItem.mapToItem(root, trayItem.implicitWidth / 2, 0).x);
+                    popouts.currentCenter = Qt.binding(() => trayItem.mapToItem(null, trayItem.implicitWidth / 2, 0).x);
                     popouts.hasCurrent = true;
                 } else {
                     popouts.hasCurrent = false;
@@ -132,7 +133,7 @@ RowLayout {
             DelegateChoice {
                 roleValue: "workspaces"
                 delegate: EntryWrapper {
-                    Workspaces {
+                    WorkspaceNumbers {
                         objectName: "taskbarWorkspaces"
                         screen: root.screen
                         fullscreen: root.fullscreen

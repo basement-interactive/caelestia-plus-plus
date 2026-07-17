@@ -27,11 +27,22 @@ Column {
         command: Config.session.commands.logout
         KeyNavigation.down: shutdown
 
-        Component.onCompleted: forceActiveFocus()
+        // Content is preloaded and kept resident (see Wrapper), so focus has
+        // to follow the open state — grabbing on creation stole the keyboard
+        // at startup and Enter anywhere in the drawers window ran logout
+        Component.onCompleted: {
+            if (root.screenState.session)
+                forceActiveFocus();
+        }
 
         Connections {
+            function onSessionChanged(): void {
+                if (root.screenState.session)
+                    logout.forceActiveFocus();
+            }
+
             function onLauncherChanged(): void {
-                if (!root.screenState.launcher)
+                if (!root.screenState.launcher && root.screenState.session)
                     logout.forceActiveFocus();
             }
 

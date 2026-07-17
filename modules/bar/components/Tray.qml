@@ -41,14 +41,6 @@ StyledRect {
     border.width: 1
     border.color: Qt.alpha(Colours.palette.m3outlineVariant, hasBg ? 0.4 : 0)
 
-    // Double-bezel: inner core nested inside the hairlined shell
-    StyledRect {
-        anchors.fill: parent
-        anchors.margins: Tokens.padding.extraSmall / 2
-        radius: root.radius
-        color: Qt.alpha(Colours.tPalette.m3surfaceContainerHigh, root.hasBg ? Colours.tPalette.m3surfaceContainerHigh.a * 0.85 : 0)
-    }
-
     Row {
         id: layout
 

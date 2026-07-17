@@ -41,7 +41,8 @@ PageBase {
             command: ["sh", "-c", "caelestia --version 2>/dev/null"]
             stdout: StdioCollector {
                 onStreamFinished: {
-                    const m = text.match(/caelestia-cli\S*\s+(\d+(?:\.\d+)*)/);
+                    // Matches both upstream "caelestia-cli" and the local "caelestia++-cli" repackage
+                    const m = text.match(/caelestia\S*-cli\S*\s+(\d+(?:\.\d+)*)/);
                     root.cliVersion = m ? m[1] : "";
                 }
             }
@@ -70,7 +71,7 @@ PageBase {
                 StyledText {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.topMargin: Tokens.spacing.small
-                    text: "Caelestia"
+                    text: "Caelestia++"
                     font: Tokens.font.headline.builders.large.width(110).build()
                 }
 

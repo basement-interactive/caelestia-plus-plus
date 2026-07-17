@@ -39,6 +39,16 @@ Variants {
 
             anchors.fill: parent
 
+            // Procedural DNA wallpaper stands in whenever no image wallpaper is set
+            Loader {
+                asynchronous: true
+
+                anchors.fill: parent
+                active: !Config.background.wallpaperEnabled
+
+                sourceComponent: DnaBackground {}
+            }
+
             Loader {
                 id: wallpaper
 
@@ -50,16 +60,6 @@ Variants {
                 sourceComponent: Wallpaper {}
             }
 
-            Visualiser {
-                anchors.fill: parent
-                screen: win.modelData
-                wallpaper: wallpaper
-            }
-
-            DesktopVisualiser {
-                anchors.centerIn: parent
-                screen: win.modelData
-            }
         }
 
         Loader {

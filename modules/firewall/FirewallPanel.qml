@@ -87,7 +87,8 @@ Scope {
 
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: parent.top
-            anchors.topMargin: Tokens.sizes.bar.innerWidth + Tokens.padding.large * 2
+            // Below the floating bar pill: pill height + its float margins + gap
+            anchors.topMargin: Tokens.sizes.bar.innerWidth + Math.max(Tokens.padding.small, Config.border.thickness) * 2 + Tokens.padding.large * 3
 
             implicitWidth: 540
             implicitHeight: Math.min(inner.implicitHeight, win.height * 0.7) + Tokens.padding.small * 2
