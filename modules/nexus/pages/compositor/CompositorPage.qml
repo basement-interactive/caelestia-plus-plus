@@ -87,11 +87,19 @@ PageBase {
 
         NavRow {
             visible: HyprMod.available
-            last: true
             icon: "tune"
             label: qsTr("System")
             status: qsTr("Volume, cursor, sleep")
             onClicked: root.nState.openSubPage(6)
+        }
+
+        NavRow {
+            visible: HyprMod.available
+            last: true
+            icon: "manufacturing"
+            label: qsTr("All options")
+            status: qsTr("Every compositor option, searchable")
+            onClicked: root.nState.openSubPage(7)
         }
     }
 }

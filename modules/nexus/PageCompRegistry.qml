@@ -103,6 +103,9 @@ QtObject {
                 Component {
                     CompositorMisc {}
                 }
+                Component {
+                    CompositorOptions {}
+                }
             }
         },
         Component {

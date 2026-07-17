@@ -12,8 +12,13 @@ ConnectedRect {
     property string subtext
     property string value
     property alias placeholder: field.placeholderText
+    // Live field content — `value` only feeds the field, edits don't write back
+    readonly property alias fieldText: field.text
 
     signal committed(value: string)
+
+    // User edits break the field.text binding; push later value changes manually
+    onValueChanged: field.text = value
 
     Layout.fillWidth: true
     implicitHeight: row.implicitHeight + Tokens.padding.medium * 2

@@ -3,11 +3,15 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Caelestia.Config
+import qs.components
+import qs.components.controls
 import qs.services
 import qs.modules.nexus.common
 
 PageBase {
     id: root
+
+    property string newBindKind: "exec"
 
     title: qsTr("Keybinds")
     isSubPage: true
@@ -46,6 +50,130 @@ PageBase {
         anchors.top: parent.top
         width: root.cappedWidth
         spacing: Tokens.spacing.extraSmall / 2
+
+        SectionHeader {
+            text: qsTr("Custom keybinds")
+        }
+
+        Repeater {
+            model: HyprMod.customBinds
+
+            ConnectedRect {
+                id: bindRow
+
+                required property var modelData
+                required property int index
+
+                Layout.fillWidth: true
+                first: index === 0
+                last: false
+                implicitHeight: bindLayout.implicitHeight + Tokens.padding.medium * 2
+
+                RowLayout {
+                    id: bindLayout
+
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: Tokens.padding.largeIncreased
+                    anchors.rightMargin: Tokens.padding.largeIncreased
+                    spacing: Tokens.spacing.medium
+
+                    Column {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        StyledText {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            text: bindRow.modelData.combo
+                            font: Tokens.font.body.small
+                            elide: Text.ElideRight
+                        }
+
+                        StyledText {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            text: (bindRow.modelData.kind === "exec" ? qsTr("Run: ") : bindRow.modelData.kind === "global" ? qsTr("Shell action: ") : qsTr("Lua: ")) + bindRow.modelData.value
+                            color: Colours.palette.m3outline
+                            font: Tokens.font.label.small
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    IconButton {
+                        icon: "delete"
+                        onClicked: HyprMod.delBind(bindRow.index)
+                    }
+                }
+            }
+        }
+
+        TextRow {
+            id: newCombo
+
+            first: HyprMod.customBinds.length === 0
+            label: qsTr("Keys")
+            placeholder: qsTr("e.g. SUPER + B")
+        }
+
+        SelectRow {
+            id: newKind
+
+            Layout.fillWidth: true
+            label: qsTr("Action type")
+            fallbackText: qsTr("Run command")
+            menuItems: [execItem, globalItem, luaItem]
+            onSelected: item => root.newBindKind = item === globalItem ? "global" : item === luaItem ? "lua" : "exec"
+
+            MenuItem {
+                id: execItem
+
+                text: qsTr("Run command")
+            }
+
+            MenuItem {
+                id: globalItem
+
+                text: qsTr("Shell action (IPC global)")
+            }
+
+            MenuItem {
+                id: luaItem
+
+                text: qsTr("Raw lua")
+            }
+        }
+
+        TextRow {
+            id: newValue
+
+            label: qsTr("Action")
+            placeholder: root.newBindKind === "exec" ? qsTr("e.g. firefox") : root.newBindKind === "global" ? qsTr("e.g. caelestia:launcher") : qsTr("e.g. hl.dsp.togglefloating()")
+        }
+
+        ConnectedRect {
+            Layout.fillWidth: true
+            last: true
+            implicitHeight: addButton.implicitHeight + Tokens.padding.medium * 2
+
+            IconTextButton {
+                id: addButton
+
+                anchors.centerIn: parent
+                icon: "add"
+                text: qsTr("Add keybind")
+                font: Tokens.font.body.large
+                isRound: true
+                type: IconTextButton.Tonal
+                disabled: !newCombo.fieldText.length || !newValue.fieldText.length
+                onClicked: {
+                    HyprMod.addBind(newCombo.fieldText, root.newBindKind, newValue.fieldText, "");
+                    newCombo.value = "";
+                    newValue.value = "";
+                }
+            }
+        }
 
         Repeater {
             model: root.sections
