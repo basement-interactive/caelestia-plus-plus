@@ -66,7 +66,9 @@ if [[ -n $old_pkgs ]]; then
 fi
 
 echo ":: installing Caelestia++ packages"
-sudo pacman -U --noconfirm "$tmp"/*.pkg.tar.zst
+# --ask=4 auto-confirms removal of conflicting packages (e.g. quickshell-git
+# giving way to the pinned build) — belt and braces alongside the swap above
+sudo pacman -U --noconfirm --ask=4 "$tmp"/*.pkg.tar.zst
 if ! grep -q '^IgnorePkg.*caelestia++' /etc/pacman.conf; then
     sudo sed -i '/^\[options\]/a IgnorePkg = caelestia++-shell caelestia++-cli' /etc/pacman.conf
 fi
