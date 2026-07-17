@@ -11,6 +11,7 @@ import fcntl
 import json
 import os
 import select
+import signal
 import struct
 import subprocess
 import sys
@@ -116,17 +117,62 @@ def matched_target(recent):
     return None
 
 
+def stale_watcher_pids():
+    """Live watcher processes running from a different copy of this script
+    (e.g. an old ~/.local/bin autostart that grabbed the lock first)."""
+    me = os.path.realpath(__file__)
+    try:
+        out = subprocess.run(["pgrep", "-af", "penis-egg-watch"],
+                             capture_output=True, text=True, timeout=2).stdout
+    except (subprocess.SubprocessError, OSError):
+        return []
+    pids = []
+    for line in out.splitlines():
+        pid, _, cmd = line.partition(" ")
+        if not pid.isdigit() or int(pid) == os.getpid():
+            continue
+        # argv[0] must BE python - a shell whose command text merely
+        # mentions this script (pkill/pgrep/cp lines) must not match
+        if not os.path.basename(cmd.split()[0]).startswith("python"):
+            continue
+        script = next((a for a in cmd.split()
+                       if a.endswith("penis-egg-watch") or a.endswith("penis-egg-watch.py")), "")
+        if script and os.path.realpath(script) != me:
+            pids.append(int(pid))
+    return pids
+
+
 def acquire_single_instance_lock():
-    """The shell spawns this at startup and users may also autostart it;
-    the flock makes the second copy exit instead of double-popping."""
+    """The shell spawns this at startup and users may also autostart a
+    copy. A same-path duplicate exits like before, but a holder running
+    from a DIFFERENT copy gets evicted and the lock taken over - the
+    shell's post-update spawn always carries the newest sequences, and
+    old copies predate this code so they can never evict back."""
     lock_dir = os.path.expanduser("~/.local/state/caelestia")
     os.makedirs(lock_dir, exist_ok=True)
     lock = open(os.path.join(lock_dir, "egg-watch.lock"), "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock
     except OSError:
+        pass
+
+    stale = stale_watcher_pids()
+    if not stale:
         raise SystemExit(0)
-    return lock
+    for pid in stale:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    for _ in range(10):
+        time.sleep(0.2)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lock
+        except OSError:
+            continue
+    raise SystemExit(0)
 
 
 def main(test=False):
