@@ -117,29 +117,53 @@ def matched_target(recent):
     return None
 
 
-def stale_watcher_pids():
-    """Live watcher processes running from a different copy of this script
-    (e.g. an old ~/.local/bin autostart that grabbed the lock first)."""
+def lock_holder_pid(lock_path):
+    """PID holding the flock, read straight from /proc/locks by the lock
+    file's inode - identifies the holder exactly, whatever its cmdline.
+    Device numbers are deliberately NOT compared: on btrfs, stat() gives
+    the subvolume's anonymous device while /proc/locks shows the
+    superblock's, so they legitimately differ."""
+    try:
+        ino = os.stat(lock_path).st_ino
+        with open("/proc/locks") as f:
+            for line in f:
+                parts = line.split()
+                # e.g.: 12: FLOCK ADVISORY WRITE 4242 08:03:1234567 0 EOF
+                if "FLOCK" not in parts:
+                    continue
+                if int(parts[-3].split(":")[2]) == ino:
+                    return int(parts[-4])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def looks_like_watcher(pid):
+    """Sanity guard before eviction: inode matching is filesystem-local,
+    so double-check the holder is actually some copy of this watcher."""
+    try:
+        comm = open(f"/proc/{pid}/comm").read().strip()
+        if comm.startswith("python") or comm.startswith("penis-egg"):
+            return True
+        return "egg-watch" in open(f"/proc/{pid}/cmdline", "rb").read().decode()
+    except OSError:
+        return False
+
+
+def is_same_script(pid):
+    """True when PID runs from this very file (a plain duplicate spawn)."""
     me = os.path.realpath(__file__)
     try:
-        out = subprocess.run(["pgrep", "-af", "penis-egg-watch"],
-                             capture_output=True, text=True, timeout=2).stdout
-    except (subprocess.SubprocessError, OSError):
-        return []
-    pids = []
-    for line in out.splitlines():
-        pid, _, cmd = line.partition(" ")
-        if not pid.isdigit() or int(pid) == os.getpid():
+        args = open(f"/proc/{pid}/cmdline", "rb").read().decode().split("\0")
+    except OSError:
+        return False
+    for arg in args:
+        try:
+            if arg and os.path.realpath(arg) == me:
+                return True
+        except OSError:
             continue
-        # argv[0] must BE python - a shell whose command text merely
-        # mentions this script (pkill/pgrep/cp lines) must not match
-        if not os.path.basename(cmd.split()[0]).startswith("python"):
-            continue
-        script = next((a for a in cmd.split()
-                       if a.endswith("penis-egg-watch") or a.endswith("penis-egg-watch.py")), "")
-        if script and os.path.realpath(script) != me:
-            pids.append(int(pid))
-    return pids
+    return False
 
 
 def acquire_single_instance_lock():
@@ -150,28 +174,28 @@ def acquire_single_instance_lock():
     old copies predate this code so they can never evict back."""
     lock_dir = os.path.expanduser("~/.local/state/caelestia")
     os.makedirs(lock_dir, exist_ok=True)
-    lock = open(os.path.join(lock_dir, "egg-watch.lock"), "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return lock
-    except OSError:
-        pass
-
-    stale = stale_watcher_pids()
-    if not stale:
-        raise SystemExit(0)
-    for pid in stale:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
-    for _ in range(10):
-        time.sleep(0.2)
+    lock_path = os.path.join(lock_dir, "egg-watch.lock")
+    lock = open(lock_path, "w")
+    for _ in range(12):
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return lock
         except OSError:
+            pass
+        holder = lock_holder_pid(lock_path)
+        if holder is None:
+            time.sleep(0.25)
             continue
+        if is_same_script(holder):
+            raise SystemExit(0)
+        if not looks_like_watcher(holder):
+            raise SystemExit(0)
+        try:
+            os.kill(holder, signal.SIGTERM)
+        except OSError:
+            # not ours to kill (e.g. another user's) - yield to it
+            raise SystemExit(0)
+        time.sleep(0.25)
     raise SystemExit(0)
 
 
