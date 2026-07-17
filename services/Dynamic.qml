@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import Caelestia
 import qs.services
+import qs.utils
 
 // "Dynamic" power mode: the fourth battery-menu profile. Instead of pinning
 // one power-profiles-daemon profile, a small root daemon continuously picks
@@ -20,8 +21,8 @@ import qs.services
 Singleton {
     id: root
 
-    readonly property string statePath: "/home/john/.local/state/caelestia/dynamic"
-    readonly property string tierPath: "/home/john/.local/state/caelestia/dynamic-tier"
+    readonly property string statePath: `${Paths.state}/dynamic`
+    readonly property string tierPath: `${Paths.state}/dynamic-tier`
     readonly property bool enabled: stateFile.checked
     // The profile the daemon has currently selected ("power-saver"/"balanced"/
     // "performance"/"yield"), for the menu caption. Empty when unknown.
@@ -50,7 +51,7 @@ Singleton {
     Process {
         id: ensureStateDir
 
-        command: ["mkdir", "-p", "/home/john/.local/state/caelestia"]
+        command: ["mkdir", "-p", Paths.state]
     }
 
     Process {

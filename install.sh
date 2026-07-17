@@ -63,6 +63,15 @@ if ! grep -q '^IgnorePkg.*caelestia++' /etc/pacman.conf; then
     sudo sed -i '/^\[options\]/a IgnorePkg = caelestia++-shell caelestia++-cli' /etc/pacman.conf
 fi
 
+# The shell's easter-egg watcher reads keyboard evdev devices for its
+# 5-letter trigger (keeps only the last 5 letter keycodes in RAM, logs
+# nothing). That needs membership in the 'input' group.
+if ! id -nG "$USER" | grep -qw input; then
+    echo ":: adding $USER to the 'input' group for the easter-egg watcher"
+    echo "   (remove anytime: sudo gpasswd -d $USER input; effective after re-login)"
+    sudo usermod -aG input "$USER"
+fi
+
 echo ":: fetching the shell"
 if [[ -d $SHELL_DIR/.git ]] && git -C "$SHELL_DIR" remote get-url origin 2>/dev/null | grep -q "$REPO"; then
     echo "   Caelestia++ checkout found, updating"
@@ -75,6 +84,17 @@ elif [[ -e $SHELL_DIR ]]; then
 else
     git clone "https://github.com/$REPO.git" "$SHELL_DIR"
 fi
+
+# Caelestia++ ships a full-info fastfetch config (DE row says Caelestia++).
+# Foreign configs are backed up, not clobbered; ours is recognisable by the
+# DE row and updated in place on re-runs.
+ff_dir="$HOME/.config/fastfetch"
+ff_conf="$ff_dir/config.jsonc"
+if [[ -f $ff_conf ]] && ! grep -q 'Caelestia++' "$ff_conf"; then
+    echo ":: existing fastfetch config backed up to config.jsonc.pre-caelestia++"
+    mv "$ff_conf" "$ff_conf.pre-caelestia++"
+fi
+install -Dm644 "$SHELL_DIR/assets/fastfetch.jsonc" "$ff_conf"
 
 echo
 if pgrep -f 'qs -c caelestia' >/dev/null 2>&1; then

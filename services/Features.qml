@@ -24,12 +24,24 @@ Singleton {
     readonly property string statePath: `${Paths.state}/features.json`
     readonly property bool lidStay: props.lidStay
 
+    // On desktops the battery popout (Dynamic's laptop home) doesn't exist,
+    // so Dynamic surfaces here instead — tuned performance-first by the
+    // daemon when it detects no battery.
+    readonly property var desktopFeatures: [
+        {
+            id: "dynamic",
+            name: qsTr("Dynamic performance"),
+            desc: Dynamic.installed ? qsTr("Auto-switches balanced/performance from live CPU load") : qsTr("Root half missing — run: sudo system/dynamic/install.sh"),
+            icon: "auto_mode",
+            enabled: Dynamic.enabled
+        }
+    ]
+
     // Drives the menu and the bar badge. Rebuilt whenever any mode flips.
     // Bed mode is in the battery popout, game mode and caffeine in the
-    // utilities cards. Every current entry is hardware-specific to laptops
-    // (power plans, undervolt, lid), so the whole list gates on the chassis;
-    // desktop-relevant features added later belong outside this guard.
-    readonly property var features: !SysInfo.isLaptop ? [] : [
+    // utilities cards. The laptop entries are hardware-specific (power
+    // plans, undervolt, lid) and gate on the chassis.
+    readonly property var features: !SysInfo.isLaptop ? desktopFeatures : [
         {
             id: "maxPerf",
             name: qsTr("Maximum performance"),
@@ -64,6 +76,9 @@ Singleton {
             break;
         case "maxPerf":
             MaxPerf.setEnabled(!MaxPerf.enabled);
+            break;
+        case "dynamic":
+            Dynamic.setEnabled(!Dynamic.enabled);
             break;
         }
     }

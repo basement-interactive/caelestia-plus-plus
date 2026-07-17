@@ -2,7 +2,9 @@ pragma ComponentBehavior: Bound
 
 import QtQuick.Layouts
 import Caelestia.Config
+import qs.components.filedialog
 import qs.services
+import qs.utils
 import qs.modules.nexus.common
 
 PageBase {
@@ -10,6 +12,13 @@ PageBase {
 
     title: qsTr("Taskbar")
     isSubPage: true
+
+    readonly property FileDialog logoPicker: FileDialog {
+        title: qsTr("Select a logo image")
+        filterLabel: qsTr("Image files")
+        filters: Images.validImageExtensions
+        onAccepted: path => ShellPrefs.setBarLogoSource(path)
+    }
 
     ColumnLayout {
         anchors.horizontalCenter: parent.horizontalCenter
@@ -69,12 +78,18 @@ PageBase {
             onMoved: v => ShellPrefs.setBarLogoOffsetY(v)
         }
 
-        TextRow {
+        NavRow {
+            icon: "image"
             label: qsTr("Custom logo image")
-            subtext: qsTr("Path to an svg/png tinted with the accent colour; empty for the distro logo")
-            placeholder: qsTr("/path/to/logo.svg")
-            value: ShellPrefs.barLogoSource
-            onCommitted: v => ShellPrefs.setBarLogoSource(v)
+            status: ShellPrefs.barLogoSource ? ShellPrefs.barLogoSource.split("/").pop() : qsTr("Distro logo")
+            onClicked: root.logoPicker.open()
+        }
+
+        NavRow {
+            visible: ShellPrefs.barLogoSource.length > 0
+            icon: "restart_alt"
+            label: qsTr("Reset to distro logo")
+            onClicked: ShellPrefs.setBarLogoSource("")
         }
 
         ToggleRow {

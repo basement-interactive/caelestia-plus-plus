@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import Caelestia
 import qs.services
+import qs.utils
 
 // "Anti-Heat" mode: run cooler WITHOUT running slower. Like BedMode/MaxPerf,
 // this singleton only flips a plain state file it owns; the privileged work
@@ -19,7 +20,7 @@ import qs.services
 Singleton {
     id: root
 
-    readonly property string statePath: "/home/john/.local/state/caelestia/anti-heat"
+    readonly property string statePath: `${Paths.state}/anti-heat`
     readonly property bool enabled: stateFile.checked
     // True once system/anti-heat/install.sh has been run (root path unit exists).
     property bool installed: false
@@ -42,7 +43,7 @@ Singleton {
     Process {
         id: ensureStateDir
 
-        command: ["mkdir", "-p", "/home/john/.local/state/caelestia"]
+        command: ["mkdir", "-p", Paths.state]
     }
 
     Process {

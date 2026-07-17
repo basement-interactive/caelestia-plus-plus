@@ -37,12 +37,22 @@ DOWN_TICKS=5           # sustained-lower ticks before stepping down a tier
 DRIFT_TICKS=15         # ticks between drift checks (heal external clobbers)
 # ---------------------------------------------------------------------------
 
+# Desktop (no battery): constant AC, so favour latency over economy — easier
+# escalation, slower step-down, and the idle floor stays at balanced (eco
+# saves nothing worth the sluggishness there).
+if ! compgen -G '/sys/class/power_supply/BAT*' >/dev/null; then
+    AGG_HIGH=20
+    DOWN_TICKS=8
+    TIER_NAMES_OVERRIDE=(balanced balanced performance)
+fi
+
 STATE_DIR=/home/john/.local/state/caelestia
 MAXPERF_STATE="$STATE_DIR/max-perf"
 BEDMODE_STATE="$STATE_DIR/bed-mode"
 TIER_FILE="$STATE_DIR/dynamic-tier"   # published for the UI to read
 
 TIER_NAMES=(power-saver balanced performance)
+[[ -n "${TIER_NAMES_OVERRIDE:-}" ]] && TIER_NAMES=("${TIER_NAMES_OVERRIDE[@]}")
 
 # All tiny file reads use $(<f) — bash-builtin, no fork; the loop must stay
 # near-zero CPU since it runs 24/7 at a 4s tick.

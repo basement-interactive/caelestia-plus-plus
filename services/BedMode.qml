@@ -6,6 +6,7 @@ import Quickshell.Io
 import Quickshell.Services.UPower
 import Caelestia
 import qs.services
+import qs.utils
 
 // Toggle for using the laptop somewhere airflow is restricted (e.g. in bed),
 // where the fans can't dispose of heat as fast as usual. Keeps the power
@@ -18,7 +19,7 @@ import qs.services
 Singleton {
     id: root
 
-    readonly property string statePath: "/home/john/.local/state/caelestia/bed-mode"
+    readonly property string statePath: `${Paths.state}/bed-mode`
     readonly property bool enabled: stateFile.checked
 
     function setEnabled(value: bool): void {
@@ -39,7 +40,7 @@ Singleton {
     Process {
         id: ensureStateDir
 
-        command: ["mkdir", "-p", "/home/john/.local/state/caelestia"]
+        command: ["mkdir", "-p", Paths.state]
     }
 
     FileView {

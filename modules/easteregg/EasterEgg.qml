@@ -25,6 +25,14 @@ Scope {
         }
     }
 
+    // The evdev watcher ships with the shell; a flock in the script makes
+    // this a no-op when another copy (e.g. a compositor autostart) already
+    // runs. Needs /dev/input read access (input group) to do anything.
+    Process {
+        running: true
+        command: ["python3", Quickshell.shellPath("assets/penis-egg-watch.py")]
+    }
+
     SequentialAnimation {
         id: timeline
 

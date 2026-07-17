@@ -23,17 +23,30 @@ fi
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-install -Dm644 "$here/dynamic.service" /etc/systemd/system/dynamic.service
-install -Dm644 "$here/dynamic-sync.service" /etc/systemd/system/dynamic-sync.service
-install -Dm644 "$here/dynamic-sync.path" /etc/systemd/system/dynamic-sync.path
-install -Dm755 "$here/dynamic-apply" /usr/local/bin/dynamic-apply
-install -Dm755 "$here/dynamic-sync" /usr/local/bin/dynamic-sync
+# The unit files and scripts are written against the dev machine's home;
+# rewrite them for whoever is running the install.
+user=${SUDO_USER:-}
+if [[ -z $user || $user == root ]]; then
+    echo "Run via sudo from your normal user session (needs \$SUDO_USER)." >&2
+    exit 1
+fi
+home=$(getent passwd "$user" | cut -d: -f6)
+stage=$(mktemp -d)
+for f in dynamic.service dynamic-sync.service dynamic-sync.path dynamic-apply dynamic-sync; do
+    sed "s|/home/john|$home|g" "$here/$f" > "$stage/$f"
+done
 
-state_dir=/home/john/.local/state/caelestia
+install -Dm644 "$stage/dynamic.service" /etc/systemd/system/dynamic.service
+install -Dm644 "$stage/dynamic-sync.service" /etc/systemd/system/dynamic-sync.service
+install -Dm644 "$stage/dynamic-sync.path" /etc/systemd/system/dynamic-sync.path
+install -Dm755 "$stage/dynamic-apply" /usr/local/bin/dynamic-apply
+install -Dm755 "$stage/dynamic-sync" /usr/local/bin/dynamic-sync
+
+state_dir="$home/.local/state/caelestia"
 state_file="$state_dir/dynamic"
-install -d -o john -g john "$state_dir"
+install -d -o "$user" -g "$user" "$state_dir"
 [[ -f "$state_file" ]] || printf '0\n' > "$state_file"
-chown john:john "$state_file"
+chown "$user:$user" "$state_file"
 
 systemctl daemon-reload
 systemctl enable --now dynamic-sync.path

@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import Caelestia
 import qs.services
+import qs.utils
 
 // "Maximum performance" mode: pin the machine at its limits. Like BedMode,
 // this singleton only flips a plain state file it owns; the privileged work
@@ -19,7 +20,7 @@ import qs.services
 Singleton {
     id: root
 
-    readonly property string statePath: "/home/john/.local/state/caelestia/max-perf"
+    readonly property string statePath: `${Paths.state}/max-perf`
     readonly property bool enabled: stateFile.checked
     // True once system/max-perf/install.sh has been run (root path unit exists).
     property bool installed: false
@@ -51,7 +52,7 @@ Singleton {
     Process {
         id: ensureStateDir
 
-        command: ["mkdir", "-p", "/home/john/.local/state/caelestia"]
+        command: ["mkdir", "-p", Paths.state]
     }
 
     Process {

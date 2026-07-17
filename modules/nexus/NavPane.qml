@@ -38,6 +38,12 @@ ColumnLayout {
             property: "searchOpen"
             value: searchField.text.length > 0
         }
+
+        Binding {
+            target: root.nState
+            property: "searchQuery"
+            value: searchField.text
+        }
     }
 
     NavLocations {

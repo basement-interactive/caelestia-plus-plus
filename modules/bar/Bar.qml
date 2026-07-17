@@ -224,9 +224,12 @@ RowLayout {
         default property Item item
         readonly property string entryId: modelData.id
 
-        Layout.leftMargin: index === 0 ? root.hPadding : 0
-        // Tighter than the left: the row already ends at the pill edge, and
-        // the full hPadding read as a hole before the rounded end
+        // Wide clearance only makes sense trailing the endcap logo; with the
+        // logo inline or hidden the row starts at the pill's rounded end and
+        // gets the same tight padding as the right side
+        Layout.leftMargin: index === 0 ? (ShellPrefs.barLogoEndcap && ShellPrefs.barLogoShow ? root.hPadding : Tokens.padding.large) : 0
+        // Tighter than the endcap side: the row already ends at the pill
+        // edge, and the full hPadding read as a hole before the rounded end
         Layout.rightMargin: index === repeater.count - 1 ? Tokens.padding.large : 0
         Layout.alignment: Qt.AlignVCenter
 
