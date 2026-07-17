@@ -49,8 +49,14 @@ fi
 
 # A regular caelestia install conflicts with the ++ packages — swap it out.
 # -Rdd because caelestia-shell-git depends on caelestia-cli and metas may pin
-# both; the ++ packages provide the same names immediately after.
-old_pkgs=$(pacman -Qq 2>/dev/null | grep -E '^caelestia-(shell|shell-git|cli|meta)$' || true)
+# both; the ++ packages provide the same names immediately after. The pinned
+# quickshell build joins the swap only when its package is actually in the
+# release (never remove quickshell without its replacement in hand).
+swap_pattern='^caelestia-(shell|shell-git|cli|meta)$'
+if compgen -G "$tmp/caelestia++-quickshell-*.pkg.tar.zst" >/dev/null; then
+    swap_pattern='^(caelestia-(shell|shell-git|cli|meta)|quickshell-git|quickshell)$'
+fi
+old_pkgs=$(pacman -Qq 2>/dev/null | grep -E "$swap_pattern" || true)
 if [[ -n $old_pkgs ]]; then
     echo ":: replacing regular caelestia packages:" $old_pkgs
     # shellcheck disable=SC2086
