@@ -25,7 +25,7 @@ KEY_DOWN = 1
 LETTER_CODES = set(range(16, 26)) | set(range(30, 39)) | set(range(44, 51))
 SEQUENCE = (25, 18, 49, 23, 31)  # KEY_P KEY_E KEY_N KEY_I KEY_S
 
-RESCAN_SECONDS = 60
+RESCAN_SECONDS = 15
 COOLDOWN_SECONDS = 5
 
 
