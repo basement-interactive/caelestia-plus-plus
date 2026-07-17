@@ -84,6 +84,17 @@ else
 fi
 if pgrep -f "penis-egg-watch" >/dev/null; then pass "egg watcher running"; else fail "egg watcher not running (shell spawns it at startup — restart the shell)"; fi
 command -v python3 >/dev/null && pass "python3 present" || fail "python3 missing"
+if qs -c caelestia ipc show 2>/dev/null | grep -q "target easterEgg"; then
+    pass "easterEgg IPC target registered"
+else
+    fail "easterEgg IPC target missing from the running shell"
+fi
+[[ -f $HOME/.config/quickshell/caelestia/assets/penis-egg-watch.py ]] \
+    && pass "watcher script present in checkout" || fail "watcher script missing from checkout"
+if [[ ${1:-} == --pop ]]; then
+    echo ":: popping the egg via IPC (watch the bottom of your screen)"
+    qs -c caelestia ipc call easterEgg pop
+fi
 
 echo "--- recent shell log (errors/warnings after your hovers land here)"
 logdir=$(ls -td /run/user/*/quickshell/by-id/*/ 2>/dev/null | head -1)

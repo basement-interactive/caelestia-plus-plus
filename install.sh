@@ -9,22 +9,24 @@ SHELL_DIR="$HOME/.config/quickshell/caelestia"
 [[ $EUID -eq 0 ]] && { echo "run as your normal user, not root"; exit 1; }
 command -v pacman >/dev/null || { echo "this installer is Arch-only"; exit 1; }
 
-echo ":: downloading Caelestia++ packages from the latest release"
 tmp=$(mktemp -d)
-curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
-    grep -o 'https://[^"]*\.pkg\.tar\.zst' | sort -u > "$tmp/urls"
+trap 'rm -rf "$tmp"' EXIT
+
+echo ":: downloading Caelestia++ packages from the latest release"
+release_json=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
+{ grep -o 'https://[^"]*\.pkg\.tar\.zst' <<<"$release_json" || true; } | sort -u > "$tmp/urls"
 [[ -s $tmp/urls ]] || { echo "no package assets on the latest release"; exit 1; }
 while read -r url; do
-    # GitHub asset URLs encode '+' as %2B; decode so filename globs match
-    fname=$(basename "$url" | sed 's/%2B/+/g')
+    # GitHub percent-encodes '+' in asset URLs (case-insensitively)
+    fname=$(basename "$url" | sed 's/%2[Bb]/+/g')
     curl -fL -o "$tmp/$fname" "$url"
 done < "$tmp/urls"
 
 deps=$(for pkg in "$tmp"/*.pkg.tar.zst; do
     bsdtar -xOf "$pkg" .PKGINFO | awk -F' = ' '$1 == "depend" {print $2}'
-done | grep -v '^caelestia' | sort -u)
+done | { grep -v '^caelestia' || true; } | sort -u)
 
-# pacman -T reports which of these aren't satisfied yet (provides count);
+# pacman -T reports which of these aren't satisfied yet (respects provides);
 # only then is an AUR helper needed at all
 # shellcheck disable=SC2086 — deps is a word list by construction
 missing=$(pacman -T $deps || true)
@@ -40,37 +42,37 @@ else
     else
         echo ":: no AUR helper found, installing paru"
         sudo pacman -S --needed --noconfirm base-devel git
-        aurtmp=$(mktemp -d)
-        git clone https://aur.archlinux.org/paru-bin.git "$aurtmp/paru-bin"
-        (cd "$aurtmp/paru-bin" && makepkg -si --noconfirm)
+        git clone https://aur.archlinux.org/paru-bin.git "$tmp/paru-bin"
+        (cd "$tmp/paru-bin" && makepkg -si --noconfirm)
         aur=paru
     fi
     # shellcheck disable=SC2086
     $aur -S --needed --asdeps --noconfirm $missing
 fi
 
-# A regular caelestia install conflicts with the ++ packages — swap it out.
-# -Rdd because caelestia-shell-git depends on caelestia-cli and metas may pin
-# both; the ++ packages provide the same names immediately after. The pinned
-# quickshell build joins the swap only when its package is actually in the
-# release (never remove quickshell without its replacement in hand).
-swap_pattern='^caelestia-(shell|shell-git|cli|meta)$'
-if compgen -G "$tmp/caelestia++-quickshell-*.pkg.tar.zst" >/dev/null; then
-    swap_pattern='^(caelestia-(shell|shell-git|cli|meta)|quickshell-git|quickshell)$'
-fi
-old_pkgs=$(pacman -Qq 2>/dev/null | grep -E "$swap_pattern" || true)
+# Old caelestia packages our replacements don't declare conflicts against
+# (plain caelestia-shell/meta) must go first; the window between removal and
+# install is guarded so an abort tells the user how to recover. quickshell's
+# swap needs no removal — the ++ package declares the conflict and --ask
+# resolves it inside one atomic, rollback-safe transaction.
+old_pkgs=$(pacman -Qq 2>/dev/null | grep -E '^caelestia-(shell|shell-git|cli|meta)$' || true)
 if [[ -n $old_pkgs ]]; then
     echo ":: replacing regular caelestia packages:" $old_pkgs
+    trap 'echo "!! aborted mid-swap: caelestia packages were removed but not yet replaced."
+          echo "!! rerun this installer to finish (dependencies are fine; skip orphan cleanup until then)."' ERR
     # shellcheck disable=SC2086
     sudo pacman -Rdd --noconfirm $old_pkgs
 fi
 
 echo ":: installing Caelestia++ packages"
-# --ask=4 auto-confirms removal of conflicting packages (e.g. quickshell-git
-# giving way to the pinned build) — belt and braces alongside the swap above
-sudo pacman -U --noconfirm --ask=4 "$tmp"/*.pkg.tar.zst
+# --ask=22 auto-answers conflict/replace removals inside the -U transaction
+sudo pacman -U --noconfirm --ask=22 "$tmp"/*.pkg.tar.zst
+trap 'rm -rf "$tmp"' EXIT ERR
+
 if ! grep -q '^IgnorePkg.*caelestia++' /etc/pacman.conf; then
-    sudo sed -i '/^\[options\]/a IgnorePkg = caelestia++-shell caelestia++-cli' /etc/pacman.conf
+    sudo sed -i '/^\[options\]/a IgnorePkg = caelestia++-shell caelestia++-cli caelestia++-quickshell' /etc/pacman.conf
+    grep -q '^IgnorePkg.*caelestia++' /etc/pacman.conf \
+        || echo "WARN: could not add IgnorePkg (no [options] section?) — add it to /etc/pacman.conf manually"
 fi
 
 # The shell's easter-egg watcher reads keyboard evdev devices for its
@@ -94,34 +96,55 @@ if [[ -d $SHELL_DIR/.git ]] && git -C "$SHELL_DIR" remote get-url origin 2>/dev/
     echo "   Caelestia++ checkout found, updating"
     git -C "$SHELL_DIR" pull --ff-only || echo "   pull failed (local changes?) — leaving checkout as is"
 elif [[ -e $SHELL_DIR ]]; then
+    # Clone to scratch first so a network failure displaces nothing
+    git clone "https://github.com/$REPO.git" "$tmp/shell-clone"
     backup="$SHELL_DIR.backup-$(date +%Y%m%d-%H%M%S)"
     echo "   existing non-Caelestia++ shell config found, moving to $backup"
     mv "$SHELL_DIR" "$backup"
-    git clone "https://github.com/$REPO.git" "$SHELL_DIR"
+    mv "$tmp/shell-clone" "$SHELL_DIR"
 else
     git clone "https://github.com/$REPO.git" "$SHELL_DIR"
 fi
 
 # Caelestia++ ships a full-info fastfetch config (DE row says Caelestia++).
-# Foreign configs are backed up, not clobbered; ours is recognisable by the
-# DE row and updated in place on re-runs.
-ff_dir="$HOME/.config/fastfetch"
-ff_conf="$ff_dir/config.jsonc"
-if [[ -f $ff_conf ]] && ! grep -q 'Caelestia++' "$ff_conf"; then
-    echo ":: existing fastfetch config backed up to config.jsonc.pre-caelestia++"
-    mv "$ff_conf" "$ff_conf.pre-caelestia++"
+# Verify the source exists (stale checkout) and copy — never move — the
+# user's config aside so an abort can't lose it.
+if [[ -f $SHELL_DIR/assets/fastfetch.jsonc ]]; then
+    ff_conf="$HOME/.config/fastfetch/config.jsonc"
+    if [[ -f $ff_conf ]] && ! grep -q 'Caelestia++' "$ff_conf"; then
+        echo ":: existing fastfetch config backed up to config.jsonc.pre-caelestia++"
+        cp "$ff_conf" "$ff_conf.pre-caelestia++"
+    fi
+    install -Dm644 "$SHELL_DIR/assets/fastfetch.jsonc" "$ff_conf"
+else
+    echo "WARN: shell checkout has no fastfetch asset — skipped"
 fi
-install -Dm644 "$SHELL_DIR/assets/fastfetch.jsonc" "$ff_conf"
+
+# Without an autostart the shell is gone after the next login
+if ! grep -rqs "caelestia shell" "$HOME/.config/hypr/" 2>/dev/null; then
+    if [[ -f $HOME/.config/hypr/hyprland.conf ]]; then
+        echo ":: adding Hyprland autostart (exec-once = caelestia shell -d)"
+        printf '\nexec-once = caelestia shell -d\n' >> "$HOME/.config/hypr/hyprland.conf"
+    else
+        echo "WARN: no Hyprland config found — add an autostart for: caelestia shell -d"
+    fi
+fi
 
 echo
 if pgrep -f 'qs -c caelestia' >/dev/null 2>&1; then
     echo ":: a shell instance is already running — restarting it as Caelestia++"
     qs -c caelestia kill 2>/dev/null || pkill -f 'qs -c caelestia' || true
     sleep 1
-    setsid -f caelestia shell -d >/dev/null 2>&1
-    echo "Caelestia++ installed and running."
-else
-    echo "Caelestia++ installed. Start it with:  caelestia shell -d"
 fi
-echo "Hyprland autostart:  exec-once = caelestia shell -d"
+if [[ -n ${WAYLAND_DISPLAY:-}${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+    setsid -f caelestia shell -d >/dev/null 2>&1 || true
+    sleep 2
+    if pgrep -f 'qs -c caelestia' >/dev/null 2>&1; then
+        echo "Caelestia++ installed and running."
+    else
+        echo "Caelestia++ installed, but the shell did not come up — start it manually: caelestia shell -d"
+    fi
+else
+    echo "Caelestia++ installed. Not inside a graphical session — start it from Hyprland: caelestia shell -d"
+fi
 echo "Updates arrive in the shell's Settings > Updates tab."

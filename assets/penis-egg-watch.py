@@ -91,8 +91,12 @@ def desktop_is_focused():
 
 
 def pop_egg():
-    subprocess.run(["qs", "-c", "caelestia", "ipc", "call", "easterEgg", "pop"],
-                   capture_output=True, timeout=5)
+    # Never let a hung/missing qs kill the watcher — nothing restarts it
+    try:
+        subprocess.run(["qs", "-c", "caelestia", "ipc", "call", "easterEgg", "pop"],
+                       capture_output=True, timeout=5)
+    except (subprocess.SubprocessError, OSError):
+        pass
 
 
 def acquire_single_instance_lock():
