@@ -13,6 +13,12 @@ Singleton {
 
     readonly property string repoDir: Quickshell.shellDir
     readonly property string remoteBranch: "origin/main"
+    // The only remote we will ever fast-forward from, and it must be HTTPS.
+    // update() refuses to pull if origin has been repointed or downgraded, so a
+    // local attacker can't swap in a malicious repo. Drop an allowed-signers
+    // file at ~/.config/caelestia/update-allowed-signers to additionally require
+    // every pulled commit to be signed by a trusted key (see the README).
+    readonly property string expectedRemote: "https://github.com/basement-interactive/caelestia-plus-plus.git"
 
     property bool checking
     property bool updating
@@ -73,12 +79,28 @@ Singleton {
     Process {
         id: updateProc
 
-        command: ["sh", "-c", `cd '${root.repoDir}' && git pull --ff-only origin main`]
+        command: ["sh", "-c", `set -e
+cd '${root.repoDir}'
+url=$(git remote get-url origin) || exit 3
+[ "$url" = '${root.expectedRemote}' ] || { echo "REMOTE_MISMATCH:$url"; exit 4; }
+case "$url" in https://*) ;; *) echo INSECURE_REMOTE; exit 5 ;; esac
+git fetch --quiet origin main || exit 2
+newtip=$(git rev-parse --verify origin/main) || exit 2
+signers="$HOME/.config/caelestia/update-allowed-signers"
+if [ -f "$signers" ]; then
+    git -c gpg.ssh.allowedSignersFile="$signers" verify-commit "$newtip" 2>/dev/null || { echo BAD_SIGNATURE; exit 6; }
+fi
+git merge --ff-only "$newtip" || exit 7`]
 
         onExited: code => {
             root.updating = false;
             if (code !== 0) {
-                root.lastError = qsTr("Update failed — local changes may conflict");
+                root.lastError =
+                    code === 4 ? qsTr("Update blocked: origin is not the expected Caelestia++ remote") :
+                    code === 5 ? qsTr("Update blocked: the update remote is not HTTPS") :
+                    code === 6 ? qsTr("Update blocked: the new commit is not signed by a trusted key") :
+                    code === 2 ? qsTr("Could not reach the update server") :
+                    qsTr("Update failed — local changes may conflict");
                 return;
             }
             // Relaunch outside our own process tree so the new checkout loads

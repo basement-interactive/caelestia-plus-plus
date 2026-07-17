@@ -1,2 +1,6 @@
 # Sync Hyprland blur to the power source on every AC plug/unplug.
-SUBSYSTEM=="power_supply", ATTR{type}=="Mains", RUN+="/usr/local/bin/blur-power-sync"
+# Trigger a systemd oneshot rather than running the sync inline: a udev RUN+=
+# action blocks the udev worker (and is killed if it runs long), and this sync
+# does socket I/O with timeouts. `systemctl --no-block` returns immediately and
+# hands the work to the service manager.
+SUBSYSTEM=="power_supply", ATTR{type}=="Mains", RUN+="/usr/bin/systemctl --no-block start blur-power-sync.service"

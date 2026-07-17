@@ -133,9 +133,25 @@ pick_tier() {
 }
 
 publish_tier() {   # $1 = tier name (or "yield"); writes only on change
+    # $TIER_FILE sits in the user-owned state dir, so a malicious user could
+    # plant a symlink there to redirect this root write onto an arbitrary file
+    # (e.g. /etc/shadow). The unchanged-path check below only compares and never
+    # emits content, so it is harmless; the write itself goes through O_NOFOLLOW
+    # so a symlink at that path is refused, never followed.
     [[ -r "$TIER_FILE" && "$(<"$TIER_FILE")" == "$1" ]] && return
-    echo "$1" > "$TIER_FILE" 2>/dev/null || true
-    chmod 644 "$TIER_FILE" 2>/dev/null || true
+    python3 - "$TIER_FILE" "$1" 2>/dev/null <<'PY' || true
+import os, sys
+path, val = sys.argv[1], sys.argv[2]
+try:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+except OSError:
+    sys.exit(0)  # symlink or unwritable at that path: refuse rather than follow
+try:
+    os.write(fd, (val + "\n").encode())
+    os.fchmod(fd, 0o644)
+finally:
+    os.close(fd)
+PY
 }
 
 # ppd profile via D-Bus directly: powerprofilesctl is a python script that

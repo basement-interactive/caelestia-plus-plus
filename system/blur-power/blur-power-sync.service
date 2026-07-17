@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync Hyprland blur to the current power source
+# Triggered by the 90-blur-power udev rule on every AC plug/unplug. Kept off the
+# udev worker so a slow socket round-trip can never stall device event handling.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/blur-power-sync

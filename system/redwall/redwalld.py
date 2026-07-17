@@ -378,7 +378,41 @@ class Redwall:
         return len(self.clients) > 0
 
     # -- UI socket server --------------------------------------------------- #
+    def _authorized(self, writer: asyncio.StreamWriter) -> bool:
+        """Defence in depth over the socket's 0660 root:ui_gid mode: confirm the
+        peer is root or actually in ui_gid via SO_PEERCRED. This mirrors the grant
+        the kernel already made when it allowed the connect, so it never rejects a
+        legitimate UI, but it refuses (and logs) anyone else should the socket mode
+        ever be created/left more permissive than intended."""
+        sock = writer.get_extra_info("socket")
+        if sock is None:
+            return False
+        try:
+            creds = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                                    struct.calcsize("3i"))
+            pid, uid, gid = struct.unpack("3i", creds)
+        except OSError:
+            return False
+        if uid == 0 or gid == self.ui_gid:
+            return True
+        try:
+            for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+                if line.startswith("Groups:"):
+                    if self.ui_gid in (int(g) for g in line.split()[1:]):
+                        return True
+                    break
+        except (OSError, ValueError):
+            pass
+        print(f"[redwall] rejected UI connection uid={uid} gid={gid} pid={pid}", flush=True)
+        return False
+
     async def _serve_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        if not self._authorized(writer):
+            try:
+                writer.close()
+            except Exception:
+                pass
+            return
         self.clients.add(writer)
         writer.write((json.dumps({"t": "rules", "rules": self.rules.snapshot()}) + "\n").encode())
         writer.write((json.dumps({"t": "state", "enabled": self.enabled}) + "\n").encode())
@@ -399,7 +433,12 @@ class Redwall:
                     msg = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                self._on_ui_message(msg)
+                try:
+                    self._on_ui_message(msg)
+                except (KeyError, ValueError, TypeError) as e:
+                    # A malformed message from a trusted-gid client must never
+                    # take down its handler; ignore it and keep serving.
+                    print(f"[redwall] ignoring malformed UI message: {e}", flush=True)
         except (ConnectionError, OSError, asyncio.IncompleteReadError):
             pass  # client vanished (shell reload); nothing to do
         finally:
