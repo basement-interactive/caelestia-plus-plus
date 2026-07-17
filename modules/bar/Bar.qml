@@ -110,11 +110,18 @@ RowLayout {
         id: repeater
 
         model: ScriptModel {
-            // Inline logo leads the row when the endcap style is off; the
-            // features wrench disappears when no feature applies (desktop)
-            values: (ShellPrefs.barLogoEndcap ? [] : [{
-                        id: "logo"
-                    }]).concat(root.Config.bar.entries.filter(e => (e.enabled ?? true) && !(e.id === "features" && Features.features.length === 0)))
+            // Endcap style: the logo caps the pill, so any "logo" entry from
+            // the user's config is dropped (stock configs ship one). Inline
+            // style: keep the config's logo entry, or lead with one if absent.
+            // The features wrench disappears when no feature applies (desktop).
+            values: {
+                const entries = root.Config.bar.entries.filter(e => (e.enabled ?? true) && !(e.id === "features" && Features.features.length === 0));
+                if (ShellPrefs.barLogoEndcap)
+                    return entries.filter(e => e.id !== "logo");
+                return entries.some(e => e.id === "logo") ? entries : [{
+                    id: "logo"
+                }].concat(entries);
+            }
         }
 
         DelegateChooser {
