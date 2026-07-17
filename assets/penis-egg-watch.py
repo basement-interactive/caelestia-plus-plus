@@ -13,6 +13,7 @@ import os
 import select
 import struct
 import subprocess
+import sys
 import time
 
 EVENT_FMT = "llHHi"  # struct input_event on 64-bit: timeval + type/code/value
@@ -112,9 +113,14 @@ def acquire_single_instance_lock():
     return lock
 
 
-def main():
-    lock = acquire_single_instance_lock()
+def main(test=False):
+    # --test: no lock (runs alongside the live watcher), no pop — prints what
+    # the watcher sees so "types but nothing happens" can be diagnosed
+    lock = None if test else acquire_single_instance_lock()
     keyboards = open_keyboards()
+    if test:
+        print(f"[test] opened {len(keyboards)} keyboard device(s): {[f.name for f in keyboards]}")
+        print("[test] type the magic word; Ctrl-C to quit")
     recent = []
     last_scan = time.monotonic()
     last_pop = 0.0
@@ -153,6 +159,10 @@ def main():
                     continue
                 recent.append(code)
                 del recent[:-len(SEQUENCE)]
+                if test and tuple(recent) == SEQUENCE:
+                    print(f"[test] SEQUENCE DETECTED; gate desktop_is_focused() = {desktop_is_focused()}")
+                    recent.clear()
+                    continue
                 if tuple(recent) == SEQUENCE and time.monotonic() - last_pop > COOLDOWN_SECONDS:
                     recent.clear()
                     if desktop_is_focused():
@@ -161,4 +171,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(test="--test" in sys.argv)
