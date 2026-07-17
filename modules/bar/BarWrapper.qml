@@ -138,13 +138,30 @@ Item {
             }
         }
 
+        // Monochrome svg logos take the accent tint; raster images (png/webp/
+        // jpg) are someone's actual artwork and render untinted
+        readonly property bool rasterLogo: /\.(png|webp|jpe?g|tiff?)$/i.test(ShellPrefs.barLogoSource)
+
         ColouredIcon {
+            visible: !logoCap.rasterLogo
             anchors.centerIn: parent
             // rounded-corner variant of SysInfo.osLogo (assets/cachyos-rounded.svg),
             // or the user's own image from prefs
-            source: ShellPrefs.barLogoSource || Qt.resolvedUrl("../../assets/cachyos-rounded.svg")
+            source: logoCap.rasterLogo ? "" : (ShellPrefs.barLogoSource || Qt.resolvedUrl("../../assets/cachyos-rounded.svg"))
             implicitSize: Math.round(root.pillHeight * 1.38 * root.logoScale)
             colour: Colours.palette.m3primary
+        }
+
+        Image {
+            visible: logoCap.rasterLogo
+            anchors.centerIn: parent
+            source: logoCap.rasterLogo ? ShellPrefs.barLogoSource : ""
+            width: Math.round(root.pillHeight * 1.38 * root.logoScale)
+            height: width
+            sourceSize: Qt.size(width, height)
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            asynchronous: true
         }
 
         MouseArea {

@@ -26,7 +26,13 @@ Item {
     Loader {
         asynchronous: true
         anchors.centerIn: parent
-        sourceComponent: !ShellPrefs.barLogoSource && SysInfo.isDefaultLogo ? caelestiaLogo : distroIcon
+        sourceComponent: {
+            if (/\.(png|webp|jpe?g|tiff?)$/i.test(ShellPrefs.barLogoSource))
+                return rasterIcon;
+            if (!ShellPrefs.barLogoSource && SysInfo.isDefaultLogo)
+                return caelestiaLogo;
+            return distroIcon;
+        }
 
         rotation: mouse.containsMouse ? 360 : 0
         scale: mouse.pressed ? 0.95 : mouse.containsMouse ? 1.15 : 1
@@ -60,6 +66,21 @@ Item {
             source: ShellPrefs.barLogoSource || SysInfo.osLogo
             implicitSize: Math.round(Tokens.font.body.large.pointSize * 1.2 * ShellPrefs.barLogoScale)
             colour: Colours.palette.m3primary
+        }
+    }
+
+    Component {
+        id: rasterIcon
+
+        // Untinted: raster logos carry their own colours
+        Image {
+            source: ShellPrefs.barLogoSource
+            width: Math.round(Tokens.font.body.large.pointSize * 1.2 * ShellPrefs.barLogoScale)
+            height: width
+            sourceSize: Qt.size(width, height)
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            asynchronous: true
         }
     }
 }
