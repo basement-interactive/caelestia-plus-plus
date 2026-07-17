@@ -50,6 +50,30 @@ def open_keyboards():
     return files
 
 
+def hyprctl_json(*args):
+    out = subprocess.run(["hyprctl", *args, "-j"],
+                         capture_output=True, text=True, timeout=2).stdout
+    return json.loads(out)
+
+
+def cursor_workspace_is_empty():
+    """Multi-monitor fallback: a window on another screen can hold focus
+    while the user types at an empty desktop, so also accept an empty
+    workspace on the monitor under the cursor."""
+    try:
+        cur = hyprctl_json("cursorpos")
+        for m in hyprctl_json("monitors"):
+            scale = m.get("scale", 1) or 1
+            if m["x"] <= cur["x"] < m["x"] + m["width"] / scale \
+                    and m["y"] <= cur["y"] < m["y"] + m["height"] / scale:
+                ws_id = m.get("activeWorkspace", {}).get("id")
+                return any(w["id"] == ws_id and w.get("windows", 1) == 0
+                           for w in hyprctl_json("workspaces"))
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError, KeyError):
+        pass
+    return False
+
+
 def desktop_is_focused():
     try:
         out = subprocess.run(["hyprctl", "activewindow", "-j"],
@@ -57,10 +81,13 @@ def desktop_is_focused():
     except (subprocess.SubprocessError, OSError):
         return False
     try:
-        return "address" not in json.loads(out)
+        if "address" not in json.loads(out):
+            return True
     except json.JSONDecodeError:
         # hyprctl prints "Invalid" (not JSON) when nothing is focused
-        return "Invalid" in out
+        if "Invalid" in out:
+            return True
+    return cursor_workspace_is_empty()
 
 
 def pop_egg():
