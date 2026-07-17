@@ -9,20 +9,6 @@ SHELL_DIR="$HOME/.config/quickshell/caelestia"
 [[ $EUID -eq 0 ]] && { echo "run as your normal user, not root"; exit 1; }
 command -v pacman >/dev/null || { echo "this installer is Arch-only"; exit 1; }
 
-# AUR helper — needed for quickshell-git and the font dependencies
-if command -v paru >/dev/null; then
-    aur=paru
-elif command -v yay >/dev/null; then
-    aur=yay
-else
-    echo ":: no AUR helper found, installing paru"
-    sudo pacman -S --needed --noconfirm base-devel git
-    aurtmp=$(mktemp -d)
-    git clone https://aur.archlinux.org/paru-bin.git "$aurtmp/paru-bin"
-    (cd "$aurtmp/paru-bin" && makepkg -si --noconfirm)
-    aur=paru
-fi
-
 echo ":: downloading Caelestia++ packages from the latest release"
 tmp=$(mktemp -d)
 curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
@@ -32,12 +18,44 @@ while read -r url; do
     curl -fL -o "$tmp/$(basename "$url")" "$url"
 done < "$tmp/urls"
 
-echo ":: installing dependencies"
 deps=$(for pkg in "$tmp"/*.pkg.tar.zst; do
     bsdtar -xOf "$pkg" .PKGINFO | awk -F' = ' '$1 == "depend" {print $2}'
 done | grep -v '^caelestia' | sort -u)
+
+# pacman -T reports which of these aren't satisfied yet (provides count);
+# only then is an AUR helper needed at all
 # shellcheck disable=SC2086 — deps is a word list by construction
-$aur -S --needed --asdeps --noconfirm $deps
+missing=$(pacman -T $deps || true)
+
+if [[ -z $missing ]]; then
+    echo ":: all dependencies already installed"
+else
+    echo ":: missing dependencies:" $missing
+    if command -v paru >/dev/null; then
+        aur=paru
+    elif command -v yay >/dev/null; then
+        aur=yay
+    else
+        echo ":: no AUR helper found, installing paru"
+        sudo pacman -S --needed --noconfirm base-devel git
+        aurtmp=$(mktemp -d)
+        git clone https://aur.archlinux.org/paru-bin.git "$aurtmp/paru-bin"
+        (cd "$aurtmp/paru-bin" && makepkg -si --noconfirm)
+        aur=paru
+    fi
+    # shellcheck disable=SC2086
+    $aur -S --needed --asdeps --noconfirm $missing
+fi
+
+# A regular caelestia install conflicts with the ++ packages — swap it out.
+# -Rdd because caelestia-shell-git depends on caelestia-cli and metas may pin
+# both; the ++ packages provide the same names immediately after.
+old_pkgs=$(pacman -Qq 2>/dev/null | grep -E '^caelestia-(shell|shell-git|cli|meta)$' || true)
+if [[ -n $old_pkgs ]]; then
+    echo ":: replacing regular caelestia packages:" $old_pkgs
+    # shellcheck disable=SC2086
+    sudo pacman -Rdd --noconfirm $old_pkgs
+fi
 
 echo ":: installing Caelestia++ packages"
 sudo pacman -U --noconfirm "$tmp"/*.pkg.tar.zst
@@ -46,8 +64,14 @@ if ! grep -q '^IgnorePkg.*caelestia++' /etc/pacman.conf; then
 fi
 
 echo ":: fetching the shell"
-if [[ -e $SHELL_DIR ]]; then
-    echo "   $SHELL_DIR already exists, leaving it untouched"
+if [[ -d $SHELL_DIR/.git ]] && git -C "$SHELL_DIR" remote get-url origin 2>/dev/null | grep -q "$REPO"; then
+    echo "   Caelestia++ checkout found, updating"
+    git -C "$SHELL_DIR" pull --ff-only || echo "   pull failed (local changes?) — leaving checkout as is"
+elif [[ -e $SHELL_DIR ]]; then
+    backup="$SHELL_DIR.backup-$(date +%Y%m%d-%H%M%S)"
+    echo "   existing non-Caelestia++ shell config found, moving to $backup"
+    mv "$SHELL_DIR" "$backup"
+    git clone "https://github.com/$REPO.git" "$SHELL_DIR"
 else
     git clone "https://github.com/$REPO.git" "$SHELL_DIR"
 fi
