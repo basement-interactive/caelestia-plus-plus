@@ -15,6 +15,8 @@ Singleton {
     property list<string> osIdLike
     property string osLogo: Qt.resolvedUrl(`${Quickshell.shellDir}/assets/logo.svg`)
     property bool isDefaultLogo: true
+    // False on desktops/VMs — laptop-only features (power modes, lid, battery) gate on this
+    property bool isLaptop: false
 
     property string uptime
     readonly property string user: Quickshell.env("USER")
@@ -105,6 +107,14 @@ Singleton {
         path: "/sys/class/dmi/id/bios_version"
         printErrors: false
         onLoaded: root.firmware = root.sanitiseDmi(text())
+    }
+
+    FileView {
+        path: "/sys/class/dmi/id/chassis_type"
+        printErrors: false
+        // SMBIOS portable chassis types: portable, laptop, notebook, handheld,
+        // sub-notebook, tablet, convertible, detachable
+        onLoaded: root.isLaptop = [8, 9, 10, 11, 14, 30, 31, 32].includes(parseInt(text()))
     }
 
     Timer {

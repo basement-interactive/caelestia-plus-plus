@@ -27,13 +27,15 @@ Item {
     // the pill lines up with tiles without ever moving itself.
     readonly property int floatMargin: 10
     readonly property int pillHeight: Tokens.sizes.bar.innerWidth + padding * 2
-    // The distro "C" logo caps the pill's left end: the pill loses its left
-    // rounding (ContentWindow) and starts this deep into the logo's mouth
-    readonly property int logoInset: Math.round(pillHeight * 0.1)
+    // Endcap style: oversized distro logo capping the pill's left end (the
+    // pill starts inside the logo's mouth). Off = regular-size logo as the
+    // first row entry, pill fully rounded on both ends.
+    readonly property bool logoEndcap: ShellPrefs.barLogoEndcap
+    readonly property int logoInset: logoEndcap ? Math.round(pillHeight * 0.1) : 0
     // Where the bar row itself starts (past the logo endcap). Hit-testing in
     // checkPopout/handleWheel must subtract this exact inset, or hover
     // targets drift left of the rendered icons
-    readonly property int contentLeftInset: floatMargin + logoInset + 44
+    readonly property int contentLeftInset: logoEndcap ? floatMargin + logoInset + 44 : floatMargin
     // Pill hangs flush at the wrapper bottom so popout blobs merge into it;
     // tiles add their own gaps_out below the zone, matching the side gaps
     readonly property int contentHeight: pillHeight + floatMargin
@@ -123,7 +125,7 @@ Item {
 
         width: Math.round(root.pillHeight * 1.38)
         height: Math.round(root.pillHeight * 1.38)
-        visible: root.shouldBeVisible
+        visible: root.shouldBeVisible && root.logoEndcap
 
         scale: logoMouse.pressed ? 0.95 : logoMouse.containsMouse ? 1.08 : 1
 

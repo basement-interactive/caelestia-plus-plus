@@ -110,7 +110,11 @@ RowLayout {
         id: repeater
 
         model: ScriptModel {
-            values: root.Config.bar.entries.filter(e => e.enabled ?? true)
+            // Inline logo leads the row when the endcap style is off; the
+            // features wrench disappears when no feature applies (desktop)
+            values: (ShellPrefs.barLogoEndcap ? [] : [{
+                        id: "logo"
+                    }]).concat(root.Config.bar.entries.filter(e => (e.enabled ?? true) && !(e.id === "features" && Features.features.length === 0)))
         }
 
         DelegateChooser {

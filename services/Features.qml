@@ -26,8 +26,10 @@ Singleton {
 
     // Drives the menu and the bar badge. Rebuilt whenever any mode flips.
     // Bed mode is in the battery popout, game mode and caffeine in the
-    // utilities cards.
-    readonly property var features: [
+    // utilities cards. Every current entry is hardware-specific to laptops
+    // (power plans, undervolt, lid), so the whole list gates on the chassis;
+    // desktop-relevant features added later belong outside this guard.
+    readonly property var features: !SysInfo.isLaptop ? [] : [
         {
             id: "maxPerf",
             name: qsTr("Maximum performance"),

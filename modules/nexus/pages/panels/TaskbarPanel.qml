@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick.Layouts
 import Caelestia.Config
+import qs.services
 import qs.modules.nexus.common
 
 PageBase {
@@ -16,9 +17,23 @@ PageBase {
         width: root.cappedWidth
         spacing: Tokens.spacing.extraSmall / 2
 
-        // Behaviour
+        // Appearance
         SectionHeader {
             first: true
+            text: qsTr("Appearance")
+        }
+
+        ToggleRow {
+            first: true
+            last: true
+            text: qsTr("Logo as edge endcap")
+            subtext: qsTr("On: oversized logo caps the pill's left end. Off: regular logo inside the fully rounded pill")
+            checked: ShellPrefs.barLogoEndcap
+            onToggled: ShellPrefs.setBarLogoEndcap(checked)
+        }
+
+        // Behaviour
+        SectionHeader {
             text: qsTr("Behaviour")
         }
 

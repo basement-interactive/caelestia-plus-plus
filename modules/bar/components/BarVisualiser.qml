@@ -64,7 +64,7 @@ StyledClippingRect {
             const t = ((j / n) * 5 + phase) % 1;
             const tri = t < 0.5 ? t * 2 : 2 - t * 2;
             const band = Math.min(half - 1, Math.floor(tri * half * 0.45));
-            sweep[j] = Math.min(1, mono[band] * (0.7 + 2.2 * tri));
+            sweep[j] = Math.min(1, mono[band] * (1.0 + 2.7 * tri));
         }
 
         // light box blur so neighbouring bars flow into each other
@@ -97,7 +97,8 @@ StyledClippingRect {
         secondaryColor: Qt.alpha(Colours.palette.m3primaryContainer, 0.16)
         rounding: 1
         spacing: 2
-        animationDuration: Tokens.anim.durations.normal * 2
+        // ~1.4x: quick enough to track beats, slow enough not to strobe
+        animationDuration: Math.round(Tokens.anim.durations.normal * 1.4)
 
         // The compiled renderer ALWAYS lays fixed 6px bars at 2px gaps from
         // the left (both `spacing` and item width are ignored) and draws at
