@@ -44,6 +44,12 @@ QtObject {
 
         // System
         {
+            label: qsTr("Compositor"),
+            icon: "grid_view",
+            description: qsTr("HyprMod: blur, gaps, input, keybinds"),
+            category: "system"
+        },
+        {
             label: qsTr("Updates"),
             icon: "update",
             description: qsTr("Caelestia++ shell updates"),
