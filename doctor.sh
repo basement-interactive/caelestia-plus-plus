@@ -85,6 +85,17 @@ fi
 if pgrep -f "penis-egg-watch" >/dev/null; then pass "egg watcher running"; else fail "egg watcher not running (shell spawns it at startup — restart the shell)"; fi
 command -v python3 >/dev/null && pass "python3 present" || fail "python3 missing"
 
+echo "--- recent shell log (errors/warnings after your hovers land here)"
+logdir=$(ls -td /run/user/*/quickshell/by-id/*/ 2>/dev/null | head -1)
+if [[ -n $logdir && -f $logdir/log.log ]]; then
+    grep -iE "error|warn" "$logdir/log.log" 2>/dev/null \
+        | grep -viE "\.face|Tokens\.padding|dbus|upower|StatusNotifier|desktopentry" \
+        | tail -25
+    echo "(benign .face/Tokens/dbus warnings filtered)"
+else
+    warn "no quickshell log dir found"
+fi
+
 echo "--- extras"
 [[ -f $HOME/.config/fastfetch/config.jsonc ]] && grep -q 'Caelestia++' "$HOME/.config/fastfetch/config.jsonc" \
     && pass "Caelestia++ fastfetch config installed" || warn "Caelestia++ fastfetch config not installed (rerun installer)"
