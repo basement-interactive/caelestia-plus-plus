@@ -24,6 +24,8 @@ Singleton {
     SystemClock {
         id: clock
 
-        precision: SystemClock.Seconds
+        // Nothing in the shell displays seconds (all formats are hh:mm);
+        // second-precision re-evaluated every derived binding 60x too often
+        precision: SystemClock.Minutes
     }
 }

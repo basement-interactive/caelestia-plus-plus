@@ -41,6 +41,8 @@ Variants {
 
             // Procedural DNA wallpaper stands in whenever no image wallpaper is set
             Loader {
+                id: dnaLoader
+
                 asynchronous: true
 
                 anchors.fill: parent
@@ -162,6 +164,7 @@ Variants {
 
             sourceComponent: DesktopClock {
                 wallpaper: behindClock
+                animationTicker: dnaLoader.item
                 absX: clockLoader.x
                 absY: clockLoader.y
             }

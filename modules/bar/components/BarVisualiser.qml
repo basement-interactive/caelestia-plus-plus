@@ -37,6 +37,17 @@ StyledClippingRect {
         if (!n)
             return;
 
+        // Silence with the bars already drained: skip entirely. Reassigning
+        // zeros on every FFT frame dirtied the (fullscreen) drawers window
+        // continuously even though nothing on screen changed.
+        if (!live && bars.settled) {
+            let peakIn = 0;
+            for (let i = 0; i < n; i++)
+                peakIn = Math.max(peakIn, v[i]);
+            if (peakIn < 0.004)
+                return;
+        }
+
         barCount = n;
         const half = n / 2;
         const mono = new Array(half);
@@ -102,7 +113,11 @@ StyledClippingRect {
     // Fixed 30 fps tick instead of FrameAnimation: half the redraws of the
     // drawers window (and its shadow layer) for a bar that reads the same
     Timer {
-        running: root.visible && (root.live || !bars.settled)
+        // barCount === 0 means retarget() never received FFT data, so there
+        // are no targets to converge on — without this guard `bars.settled`
+        // stays false forever and the tick redraws the bar at 30 fps for
+        // nothing (measured: continuous drawers-window renders in silence)
+        running: root.visible && root.barCount > 0 && (root.live || !bars.settled)
         repeat: true
         interval: 33
         onTriggered: bars.advance(0.033)

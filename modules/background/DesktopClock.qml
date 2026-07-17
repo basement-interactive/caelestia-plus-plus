@@ -11,6 +11,9 @@ Item {
     id: root
 
     required property Item wallpaper
+    // The animated wallpaper item when one is active (null on static images);
+    // the glass grab re-renders in lockstep with its frames
+    property Item animationTicker
     required property real absX
     required property real absY
 
@@ -46,8 +49,55 @@ Item {
 
             sourceComponent: MultiEffect {
                 source: ShaderEffectSource {
+                    id: glassSource
+
                     sourceItem: root.wallpaper
                     sourceRect: Qt.rect(root.absX, root.absY, root.width, root.height)
+                    // The grab feeds a heavy blur, so half resolution is
+                    // indistinguishable and quarters the per-frame cost
+                    textureSize: Qt.size(Math.ceil(root.width / 2), Math.ceil(root.height / 2))
+
+                    // A live grab re-rendered this window on every wallpaper
+                    // frame ON TOP of the wallpaper's own render (measured
+                    // ~60 fps on the background window). Grabbing on the
+                    // wallpaper's own frame signal keeps them in lockstep —
+                    // one window render per wallpaper frame, none on a
+                    // static image.
+                    live: false
+                    Component.onCompleted: scheduleUpdate()
+
+                    Connections {
+                        target: root.animationTicker
+                        ignoreUnknownSignals: true
+
+                        function onFrameAdvanced(): void {
+                            glassSource.scheduleUpdate();
+                        }
+                    }
+
+                    // Covers the crossfade when a static wallpaper is set or changed
+                    Timer {
+                        id: wallpaperSwitchBurst
+
+                        interval: 2000
+                        onRunningChanged: glassBurstTick.running = running
+                    }
+
+                    Timer {
+                        id: glassBurstTick
+
+                        repeat: true
+                        interval: 33
+                        onTriggered: glassSource.scheduleUpdate()
+                    }
+
+                    Connections {
+                        target: Wallpapers
+
+                        function onCurrentChanged(): void {
+                            wallpaperSwitchBurst.restart();
+                        }
+                    }
                 }
                 maskSource: backgroundPlate
                 maskEnabled: true

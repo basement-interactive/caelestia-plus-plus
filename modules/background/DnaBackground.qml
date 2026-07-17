@@ -14,6 +14,12 @@ Item {
     readonly property real timeWrap: 897.5979010256552
     property real startMs: 0
 
+    // One emission per rendered wallpaper frame; consumers that must redraw
+    // in lockstep (the desktop clock's glass grab) listen to this instead of
+    // running their own timer — two unsynced 30 fps timers made the window
+    // render at 60 fps
+    signal frameAdvanced()
+
     ShaderEffect {
         id: fx
 
@@ -37,6 +43,7 @@ Item {
             if (root.startMs === 0)
                 root.startMs = Date.now();
             fx.uTime = ((Date.now() - root.startMs) / 1000) % root.timeWrap;
+            root.frameAdvanced();
         }
     }
 }

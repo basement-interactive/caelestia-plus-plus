@@ -31,11 +31,21 @@ PageBase {
         spacing: Tokens.spacing.extraSmall / 2
 
         StyledTextField {
+            id: searchField
+
             Layout.fillWidth: true
             Layout.bottomMargin: Tokens.spacing.medium
             leadingIcon: "search"
             placeholderText: qsTr("Search %1 compositor options…").arg(HyprMod.schema.length)
-            onTextChanged: root.query = text
+            onTextChanged: queryDebounce.restart()
+
+            // Filtering rebuilds up to 40 delegate rows — batch keystrokes
+            Timer {
+                id: queryDebounce
+
+                interval: 150
+                onTriggered: root.query = searchField.text
+            }
         }
 
         StyledText {

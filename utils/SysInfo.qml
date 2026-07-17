@@ -110,7 +110,8 @@ Singleton {
     Timer {
         running: true
         repeat: true
-        interval: 15000
+        // Displayed as days/hours/minutes only (dashboard User, lock Fetch)
+        interval: 60000
         onTriggered: fileUptime.reload()
     }
 
