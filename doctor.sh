@@ -14,7 +14,7 @@ echo "--- packages"
 for p in caelestia++-shell caelestia++-cli caelestia++-quickshell; do
     if v=$(pacman -Q "$p" 2>/dev/null); then pass "$v"; else fail "$p not installed"; fi
 done
-if v=$(pacman -Q quickshell-git 2>/dev/null); then
+if v=$(pacman -Q quickshell-git 2>/dev/null) && [[ $v == quickshell-git* ]]; then
     warn "$v still installed (pinned build not swapped in)"
 fi
 

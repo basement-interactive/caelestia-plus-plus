@@ -25,7 +25,10 @@ RowLayout {
             return;
 
         for (let i = 0; i < repeater.count; i++) {
-            const tray = (repeater.itemAt(i) as EntryWrapper).item as Tray;
+            // itemAt is null for delegates not yet materialized; throwing
+            // here aborted checkPopout and killed every status-icon popout
+            // whenever the compact tray was enabled
+            const tray = (repeater.itemAt(i) as EntryWrapper)?.item as Tray;
             if (tray)
                 tray.expanded = false;
         }
