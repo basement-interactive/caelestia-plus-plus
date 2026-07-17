@@ -4,7 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Bridge to the HyprMod compositor. Three layers, all through hyprmod-ctl.py:
+// Bridge to the HyprMod Hyprland-customizer layer. Three surfaces, all through hyprmod-ctl.py:
 // curated scalar knobs from variables.lua, arbitrary option overrides on top
 // of the lua config, and custom keybinds. Writes are optimistic in the UI and
 // serialized through a queue so rapid changes never race the helper's

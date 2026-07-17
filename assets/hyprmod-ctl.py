@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge between the Caelestia++ settings UI and the HyprMod compositor.
+"""Bridge between the Caelestia++ settings UI and the HyprMod Hyprland customizer.
 
 Curated knobs (variables.lua):
   dump                    scalar knobs as JSON

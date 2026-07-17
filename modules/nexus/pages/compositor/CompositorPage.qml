@@ -38,7 +38,7 @@ PageBase {
 
             StyledText {
                 Layout.alignment: Qt.AlignHCenter
-                text: qsTr("These settings need the HyprMod compositor and its variables.lua.")
+                text: qsTr("These settings need the HyprMod Hyprland customizer and its variables.lua.")
                 color: Colours.palette.m3outlineVariant
                 font: Tokens.font.body.large
             }
