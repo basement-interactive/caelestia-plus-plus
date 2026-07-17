@@ -42,6 +42,7 @@ ShellRoot {
     ConfigToasts {}
     Shortcuts {}
     EasterEgg {}
+    IsraelEgg {}
     BatteryMonitor {}
     IdleMonitors {
         lock: lock

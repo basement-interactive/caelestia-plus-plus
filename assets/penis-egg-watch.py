@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Desktop easter egg: typing p-e-n-i-s while no window is focused pops
-a cartoon surprise via the caelestia shell (IPC target `easterEgg`).
+"""Desktop easter eggs: typing a trigger word while no window is focused
+pops a surprise via the caelestia shell IPC (one target per egg).
 
 Reads keyboard evdev devices directly (needs read access to /dev/input:
-`input` group, or a setfacl grant). Only the last five letter keycodes
+`input` group, or a setfacl grant). Only the last few letter keycodes
 are held in memory - nothing is logged, stored, or sent anywhere.
 """
 
@@ -23,7 +23,12 @@ KEY_DOWN = 1
 
 # qwerty letter rows (KEY_Q..KEY_P, KEY_A..KEY_L, KEY_Z..KEY_M)
 LETTER_CODES = set(range(16, 26)) | set(range(30, 39)) | set(range(44, 51))
-SEQUENCE = (25, 18, 49, 23, 31)  # KEY_P KEY_E KEY_N KEY_I KEY_S
+# trigger word (as keycodes) -> shell IPC target to call `pop` on
+SEQUENCES = {
+    (25, 18, 49, 23, 31): "easterEgg",          # p-e-n-i-s
+    (23, 31, 19, 30, 18, 38): "israelEgg",      # i-s-r-a-e-l
+}
+LONGEST_SEQUENCE = max(len(seq) for seq in SEQUENCES)
 
 RESCAN_SECONDS = 15
 COOLDOWN_SECONDS = 5
@@ -95,13 +100,20 @@ def desktop_is_focused():
     return cursor_workspace_is_empty()
 
 
-def pop_egg():
+def pop_egg(target):
     # Never let a hung/missing qs kill the watcher — nothing restarts it
     try:
-        subprocess.run(["qs", "-c", "caelestia", "ipc", "call", "easterEgg", "pop"],
+        subprocess.run(["qs", "-c", "caelestia", "ipc", "call", target, "pop"],
                        capture_output=True, timeout=5)
     except (subprocess.SubprocessError, OSError):
         pass
+
+
+def matched_target(recent):
+    for sequence, target in SEQUENCES.items():
+        if tuple(recent[-len(sequence):]) == sequence:
+            return target
+    return None
 
 
 def acquire_single_instance_lock():
@@ -163,16 +175,19 @@ def main(test=False):
                     recent.clear()
                     continue
                 recent.append(code)
-                del recent[:-len(SEQUENCE)]
-                if test and tuple(recent) == SEQUENCE:
-                    print(f"[test] SEQUENCE DETECTED; gate desktop_is_focused() = {desktop_is_focused()}", flush=True)
+                del recent[:-LONGEST_SEQUENCE]
+                target = matched_target(recent)
+                if target is None:
+                    continue
+                if test:
+                    print(f"[test] SEQUENCE DETECTED ({target}); gate desktop_is_focused() = {desktop_is_focused()}", flush=True)
                     recent.clear()
                     continue
-                if tuple(recent) == SEQUENCE and time.monotonic() - last_pop > COOLDOWN_SECONDS:
+                if time.monotonic() - last_pop > COOLDOWN_SECONDS:
                     recent.clear()
                     if desktop_is_focused():
                         last_pop = time.monotonic()
-                        pop_egg()
+                        pop_egg(target)
 
 
 if __name__ == "__main__":
