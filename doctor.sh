@@ -77,7 +77,7 @@ if [[ $readable == 1 ]]; then
     pass "/dev/input readable in THIS session"
 else
     if id -nG "$USER" | grep -qw input; then
-        fail "/dev/input NOT readable yet — group added but you have not re-logged in"
+        fail "/dev/input NOT readable yet — rerun the installer (it grants this session access via setfacl)"
     else
         fail "/dev/input not readable"
     fi

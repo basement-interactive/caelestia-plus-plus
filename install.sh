@@ -75,11 +75,18 @@ fi
 
 # The shell's easter-egg watcher reads keyboard evdev devices for its
 # 5-letter trigger (keeps only the last 5 letter keycodes in RAM, logs
-# nothing). That needs membership in the 'input' group.
+# nothing). Group membership makes it permanent; the ACL grant makes it
+# work in THIS session without re-logging (the watcher rescans within 60s).
 if ! id -nG "$USER" | grep -qw input; then
     echo ":: adding $USER to the 'input' group for the easter-egg watcher"
-    echo "   (remove anytime: sudo gpasswd -d $USER input; effective after re-login)"
+    echo "   (remove anytime: sudo gpasswd -d $USER input)"
     sudo usermod -aG input "$USER"
+fi
+readable=0
+for f in /dev/input/event*; do [[ -r $f ]] && readable=1 && break; done
+if [[ $readable == 0 ]]; then
+    echo ":: granting the current session read access to input devices"
+    sudo setfacl -m "u:$USER:r" /dev/input/event* 2>/dev/null || true
 fi
 
 echo ":: fetching the shell"
