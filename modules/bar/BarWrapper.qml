@@ -29,13 +29,16 @@ Item {
     readonly property int pillHeight: Tokens.sizes.bar.innerWidth + padding * 2
     // Endcap style: oversized distro logo capping the pill's left end (the
     // pill starts inside the logo's mouth). Off = regular-size logo as the
-    // first row entry, pill fully rounded on both ends.
-    readonly property bool logoEndcap: ShellPrefs.barLogoEndcap
+    // first row entry, pill fully rounded on both ends. Hiding the logo
+    // altogether collapses the endcap the same way.
+    readonly property bool logoEndcap: ShellPrefs.barLogoEndcap && ShellPrefs.barLogoShow
+    readonly property real logoScale: ShellPrefs.barLogoScale
     readonly property int logoInset: logoEndcap ? Math.round(pillHeight * 0.1) : 0
     // Where the bar row itself starts (past the logo endcap). Hit-testing in
     // checkPopout/handleWheel must subtract this exact inset, or hover
-    // targets drift left of the rendered icons
-    readonly property int contentLeftInset: logoEndcap ? floatMargin + logoInset + 44 : floatMargin
+    // targets drift left of the rendered icons. Scales and shifts with the
+    // logo so content never slides under it.
+    readonly property int contentLeftInset: logoEndcap ? floatMargin + logoInset + Math.round(44 * logoScale) + Math.max(0, ShellPrefs.barLogoOffsetX) : floatMargin
     // Pill hangs flush at the wrapper bottom so popout blobs merge into it;
     // tiles add their own gaps_out below the zone, matching the side gaps
     readonly property int contentHeight: pillHeight + floatMargin
@@ -118,13 +121,13 @@ Item {
 
         anchors.left: parent.left
         anchors.bottom: parent.bottom
-        anchors.leftMargin: root.floatMargin
+        anchors.leftMargin: root.floatMargin + ShellPrefs.barLogoOffsetX
         // centre the C on the pill, lifted 1px: the glyph's bottom bevel is
         // visually heavier, so true centring reads low
-        anchors.bottomMargin: -Math.round((height - root.pillHeight) / 2) + 1
+        anchors.bottomMargin: -Math.round((height - root.pillHeight) / 2) + 1 - ShellPrefs.barLogoOffsetY
 
-        width: Math.round(root.pillHeight * 1.38)
-        height: Math.round(root.pillHeight * 1.38)
+        width: Math.round(root.pillHeight * 1.38 * root.logoScale)
+        height: Math.round(root.pillHeight * 1.38 * root.logoScale)
         visible: root.shouldBeVisible && root.logoEndcap
 
         scale: logoMouse.pressed ? 0.95 : logoMouse.containsMouse ? 1.08 : 1
@@ -137,9 +140,10 @@ Item {
 
         ColouredIcon {
             anchors.centerIn: parent
-            // rounded-corner variant of SysInfo.osLogo (assets/cachyos-rounded.svg)
-            source: Qt.resolvedUrl("../../assets/cachyos-rounded.svg")
-            implicitSize: Math.round(root.pillHeight * 1.38)
+            // rounded-corner variant of SysInfo.osLogo (assets/cachyos-rounded.svg),
+            // or the user's own image from prefs
+            source: ShellPrefs.barLogoSource || Qt.resolvedUrl("../../assets/cachyos-rounded.svg")
+            implicitSize: Math.round(root.pillHeight * 1.38 * root.logoScale)
             colour: Colours.palette.m3primary
         }
 

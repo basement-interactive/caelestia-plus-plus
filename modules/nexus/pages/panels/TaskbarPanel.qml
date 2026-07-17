@@ -25,11 +25,64 @@ PageBase {
 
         ToggleRow {
             first: true
-            last: true
+            text: qsTr("Show logo")
+            checked: ShellPrefs.barLogoShow
+            onToggled: ShellPrefs.setBarLogoShow(checked)
+        }
+
+        ToggleRow {
             text: qsTr("Logo as edge endcap")
             subtext: qsTr("On: oversized logo caps the pill's left end. Off: regular logo inside the fully rounded pill")
             checked: ShellPrefs.barLogoEndcap
+            enabled: ShellPrefs.barLogoShow
             onToggled: ShellPrefs.setBarLogoEndcap(checked)
+        }
+
+        StepperRow {
+            label: qsTr("Logo size")
+            subtext: qsTr("Percent of the default size")
+            value: Math.round(ShellPrefs.barLogoScale * 100)
+            from: 50
+            to: 200
+            stepSize: 10
+            enabled: ShellPrefs.barLogoShow
+            onMoved: v => ShellPrefs.setBarLogoScale(v / 100)
+        }
+
+        StepperRow {
+            label: qsTr("Logo offset X")
+            subtext: qsTr("Pixels rightward; endcap style only")
+            value: ShellPrefs.barLogoOffsetX
+            from: -20
+            to: 80
+            enabled: ShellPrefs.barLogoShow && ShellPrefs.barLogoEndcap
+            onMoved: v => ShellPrefs.setBarLogoOffsetX(v)
+        }
+
+        StepperRow {
+            label: qsTr("Logo offset Y")
+            subtext: qsTr("Pixels upward; endcap style only")
+            value: ShellPrefs.barLogoOffsetY
+            from: -20
+            to: 20
+            enabled: ShellPrefs.barLogoShow && ShellPrefs.barLogoEndcap
+            onMoved: v => ShellPrefs.setBarLogoOffsetY(v)
+        }
+
+        TextRow {
+            label: qsTr("Custom logo image")
+            subtext: qsTr("Path to an svg/png tinted with the accent colour; empty for the distro logo")
+            placeholder: qsTr("/path/to/logo.svg")
+            value: ShellPrefs.barLogoSource
+            onCommitted: v => ShellPrefs.setBarLogoSource(v)
+        }
+
+        ToggleRow {
+            last: true
+            text: qsTr("Active window readout")
+            subtext: qsTr("Show the focused window's title in the bar (needs an activeWindow entry in the bar config)")
+            checked: ShellPrefs.barShowActiveWindow
+            onToggled: ShellPrefs.setBarShowActiveWindow(checked)
         }
 
         // Behaviour

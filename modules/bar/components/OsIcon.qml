@@ -26,7 +26,7 @@ Item {
     Loader {
         asynchronous: true
         anchors.centerIn: parent
-        sourceComponent: SysInfo.isDefaultLogo ? caelestiaLogo : distroIcon
+        sourceComponent: !ShellPrefs.barLogoSource && SysInfo.isDefaultLogo ? caelestiaLogo : distroIcon
 
         rotation: mouse.containsMouse ? 360 : 0
         scale: mouse.pressed ? 0.95 : mouse.containsMouse ? 1.15 : 1
@@ -48,8 +48,8 @@ Item {
         id: caelestiaLogo
 
         Logo {
-            implicitWidth: Math.round(Tokens.font.body.large.pointSize * 1.6)
-            implicitHeight: Math.round(Tokens.font.body.large.pointSize * 1.6)
+            implicitWidth: Math.round(Tokens.font.body.large.pointSize * 1.6 * ShellPrefs.barLogoScale)
+            implicitHeight: Math.round(Tokens.font.body.large.pointSize * 1.6 * ShellPrefs.barLogoScale)
         }
     }
 
@@ -57,8 +57,8 @@ Item {
         id: distroIcon
 
         ColouredIcon {
-            source: SysInfo.osLogo
-            implicitSize: Math.round(Tokens.font.body.large.pointSize * 1.2)
+            source: ShellPrefs.barLogoSource || SysInfo.osLogo
+            implicitSize: Math.round(Tokens.font.body.large.pointSize * 1.2 * ShellPrefs.barLogoScale)
             colour: Colours.palette.m3primary
         }
     }

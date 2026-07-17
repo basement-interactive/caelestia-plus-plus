@@ -115,8 +115,10 @@ RowLayout {
             // style: keep the config's logo entry, or lead with one if absent.
             // The features wrench disappears when no feature applies (desktop).
             values: {
-                const entries = root.Config.bar.entries.filter(e => (e.enabled ?? true) && !(e.id === "features" && Features.features.length === 0));
-                if (ShellPrefs.barLogoEndcap)
+                const entries = root.Config.bar.entries.filter(e => (e.enabled ?? true)
+                    && !(e.id === "features" && Features.features.length === 0)
+                    && !(e.id === "activeWindow" && !ShellPrefs.barShowActiveWindow));
+                if (ShellPrefs.barLogoEndcap || !ShellPrefs.barLogoShow)
                     return entries.filter(e => e.id !== "logo");
                 return entries.some(e => e.id === "logo") ? entries : [{
                     id: "logo"
@@ -223,7 +225,9 @@ RowLayout {
         readonly property string entryId: modelData.id
 
         Layout.leftMargin: index === 0 ? root.hPadding : 0
-        Layout.rightMargin: index === repeater.count - 1 ? root.hPadding : 0
+        // Tighter than the left: the row already ends at the pill edge, and
+        // the full hPadding read as a hole before the rounded end
+        Layout.rightMargin: index === repeater.count - 1 ? Tokens.padding.large : 0
         Layout.alignment: Qt.AlignVCenter
 
         implicitWidth: item?.implicitWidth ?? 0

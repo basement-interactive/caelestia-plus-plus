@@ -17,6 +17,17 @@ Singleton {
     // end; false = regular-size logo inside the pill with normal rounding
     readonly property bool barLogoEndcap: props.barLogoEndcap
 
+    // Bar logo: visibility, size (factor), endcap position nudge, custom image
+    readonly property bool barLogoShow: props.barLogoShow
+    readonly property real barLogoScale: props.barLogoScale
+    readonly property int barLogoOffsetX: props.barLogoOffsetX
+    readonly property int barLogoOffsetY: props.barLogoOffsetY
+    readonly property string barLogoSource: props.barLogoSource
+
+    // Caelestia++ ships without the centre active-window readout; stock
+    // configs still carry the entry, so it stays filtered until enabled here
+    readonly property bool barShowActiveWindow: props.barShowActiveWindow
+
     // Animated DNA background (shown when no image wallpaper is set)
     readonly property bool dnaEnabled: props.dnaEnabled
     readonly property bool dnaUseThemeColor: props.dnaUseThemeColor
@@ -26,6 +37,48 @@ Singleton {
         if (value === props.barLogoEndcap)
             return;
         props.barLogoEndcap = value;
+        save();
+    }
+
+    function setBarLogoShow(value: bool): void {
+        if (value === props.barLogoShow)
+            return;
+        props.barLogoShow = value;
+        save();
+    }
+
+    function setBarLogoScale(value: real): void {
+        if (value === props.barLogoScale)
+            return;
+        props.barLogoScale = value;
+        save();
+    }
+
+    function setBarLogoOffsetX(value: int): void {
+        if (value === props.barLogoOffsetX)
+            return;
+        props.barLogoOffsetX = value;
+        save();
+    }
+
+    function setBarLogoOffsetY(value: int): void {
+        if (value === props.barLogoOffsetY)
+            return;
+        props.barLogoOffsetY = value;
+        save();
+    }
+
+    function setBarLogoSource(value: string): void {
+        if (value === props.barLogoSource)
+            return;
+        props.barLogoSource = value;
+        save();
+    }
+
+    function setBarShowActiveWindow(value: bool): void {
+        if (value === props.barShowActiveWindow)
+            return;
+        props.barShowActiveWindow = value;
         save();
     }
 
@@ -53,6 +106,12 @@ Singleton {
     function save(): void {
         store.setText(JSON.stringify({
             barLogoEndcap: props.barLogoEndcap,
+            barLogoShow: props.barLogoShow,
+            barLogoScale: props.barLogoScale,
+            barLogoOffsetX: props.barLogoOffsetX,
+            barLogoOffsetY: props.barLogoOffsetY,
+            barLogoSource: props.barLogoSource,
+            barShowActiveWindow: props.barShowActiveWindow,
             dnaEnabled: props.dnaEnabled,
             dnaUseThemeColor: props.dnaUseThemeColor,
             dnaCustomColor: props.dnaCustomColor
@@ -63,6 +122,12 @@ Singleton {
         id: props
 
         property bool barLogoEndcap: true
+        property bool barLogoShow: true
+        property real barLogoScale: 1.0
+        property int barLogoOffsetX: 0
+        property int barLogoOffsetY: 0
+        property string barLogoSource: ""
+        property bool barShowActiveWindow: false
         property bool dnaEnabled: true
         property bool dnaUseThemeColor: true
         property string dnaCustomColor: "#ff5449"
@@ -83,6 +148,12 @@ Singleton {
                 return;
             }
             props.barLogoEndcap = saved.barLogoEndcap ?? true;
+            props.barLogoShow = saved.barLogoShow ?? true;
+            props.barLogoScale = saved.barLogoScale ?? 1.0;
+            props.barLogoOffsetX = saved.barLogoOffsetX ?? 0;
+            props.barLogoOffsetY = saved.barLogoOffsetY ?? 0;
+            props.barLogoSource = saved.barLogoSource ?? "";
+            props.barShowActiveWindow = saved.barShowActiveWindow ?? false;
             props.dnaEnabled = saved.dnaEnabled ?? true;
             props.dnaUseThemeColor = saved.dnaUseThemeColor ?? true;
             props.dnaCustomColor = saved.dnaCustomColor ?? "#ff5449";
