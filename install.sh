@@ -77,6 +77,14 @@ else
 fi
 
 echo
-echo "Caelestia++ installed. Start it with:  caelestia shell -d"
+if pgrep -f 'qs -c caelestia' >/dev/null 2>&1; then
+    echo ":: a shell instance is already running — restarting it as Caelestia++"
+    qs -c caelestia kill 2>/dev/null || pkill -f 'qs -c caelestia' || true
+    sleep 1
+    setsid -f caelestia shell -d >/dev/null 2>&1
+    echo "Caelestia++ installed and running."
+else
+    echo "Caelestia++ installed. Start it with:  caelestia shell -d"
+fi
 echo "Hyprland autostart:  exec-once = caelestia shell -d"
 echo "Updates arrive in the shell's Settings > Updates tab."
