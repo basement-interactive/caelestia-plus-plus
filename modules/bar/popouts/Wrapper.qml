@@ -59,33 +59,32 @@ Item {
         detachedMode = "";
     }
 
-    // Remote diagnosis for dead hover popouts:
-    //   qs -c caelestia ipc call popouts open network   force a popout open
-    //   qs -c caelestia ipc call popouts state          where the chain stops
-    LazyLoader {
-        active: root.screen === Quickshell.screens[0]
+    // Remote diagnosis for dead hover popouts — one target per screen, since
+    // every monitor has its own wrapper and the failure can be per-screen:
+    //   qs -c caelestia ipc call popouts-<monitor> open network
+    //   qs -c caelestia ipc call popouts-<monitor> state
+    // (monitor names from: hyprctl monitors -j | jq -r '.[].name')
+    IpcHandler {
+        target: `popouts-${root.screen.name}`
 
-        IpcHandler {
-            target: "popouts"
+        function open(name: string): void {
+            root.currentCenter = root.screen.width / 2;
+            root.currentName = name;
+            root.hasCurrent = true;
+        }
 
-            function open(name: string): void {
-                root.currentCenter = root.screen.width / 2;
-                root.currentName = name;
-                root.hasCurrent = true;
-            }
+        function close(): void {
+            root.close();
+        }
 
-            function close(): void {
-                root.close();
-            }
-
-            function state(): string {
-                return JSON.stringify({
-                    hasCurrent: root.hasCurrent,
-                    currentName: root.currentName,
-                    lastCheckX: root.lastCheckX,
-                    statusIconsPopouts: root.dummy.Config.bar.popouts.statusIcons
-                });
-            }
+        function state(): string {
+            return JSON.stringify({
+                screen: root.screen.name,
+                hasCurrent: root.hasCurrent,
+                currentName: root.currentName,
+                lastCheckX: root.lastCheckX,
+                statusIconsPopouts: root.dummy.Config.bar.popouts.statusIcons
+            });
         }
     }
 
