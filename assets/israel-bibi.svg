@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 300">
+  <!-- stylized statesman portrait: dark suit, light-blue tie, silver swept-back hair -->
+  <!-- suit -->
+  <path d="M28 300 L44 234 Q58 206 96 198 L120 192 L144 198 Q182 206 196 234 L212 300 Z" fill="#1b2440"/>
+  <path d="M96 198 L120 246 L84 226 Z" fill="#141b31"/>
+  <path d="M144 198 L120 246 L156 226 Z" fill="#141b31"/>
+  <!-- shirt -->
+  <path d="M96 198 L120 238 L144 198 L133 192 L120 199 L107 192 Z" fill="#f4f6f8"/>
+  <!-- tie -->
+  <path d="M120 202 L111 216 L118 268 L120 274 L122 268 L129 216 Z" fill="#4a90d9"/>
+  <path d="M120 202 L111 216 L120 224 L129 216 Z" fill="#3a7cc4"/>
+  <!-- neck -->
+  <path d="M104 164 L104 196 Q120 206 136 196 L136 164 Z" fill="#dda87c"/>
+  <!-- ears -->
+  <ellipse cx="62" cy="120" rx="11" ry="17" fill="#e3af83"/>
+  <ellipse cx="178" cy="120" rx="11" ry="17" fill="#e3af83"/>
+  <!-- face: broad, squarish jaw -->
+  <path d="M64 92 Q64 44 120 42 Q176 44 176 92 L176 118 Q176 152 158 170 Q140 186 120 186 Q100 186 82 170 Q64 152 64 118 Z" fill="#eab88d"/>
+  <!-- silver hair: high receded front, swept back over crown and sides -->
+  <path d="M56 118 Q50 70 70 50 Q95 26 126 28 Q168 30 182 60 Q190 80 184 118
+           Q176 100 174 88 Q168 72 154 64 Q136 56 118 58 Q96 58 80 70
+           Q66 82 64 100 Q62 110 56 118 Z" fill="#d9dadc"/>
+  <path d="M56 118 Q54 128 58 136 Q64 132 64 118 Q64 104 66 96 Q58 104 56 118 Z" fill="#c8c9cc"/>
+  <path d="M184 118 Q186 128 182 136 Q176 132 176 118 Q176 104 174 96 Q182 104 184 118 Z" fill="#c8c9cc"/>
+  <!-- brows: thick, dark gray -->
+  <path d="M78 102 Q92 94 108 100 L106 108 Q92 102 80 108 Z" fill="#5a5450"/>
+  <path d="M162 102 Q148 94 132 100 L134 108 Q148 102 160 108 Z" fill="#5a5450"/>
+  <!-- eyes -->
+  <path d="M82 116 Q93 108 106 115 Q94 124 82 116 Z" fill="#fdfdfd"/>
+  <path d="M158 116 Q147 108 134 115 Q146 124 158 116 Z" fill="#fdfdfd"/>
+  <circle cx="94" cy="115.5" r="4.4" fill="#4e6378"/>
+  <circle cx="146" cy="115.5" r="4.4" fill="#4e6378"/>
+  <circle cx="94" cy="115.5" r="2" fill="#1c1c1c"/>
+  <circle cx="146" cy="115.5" r="2" fill="#1c1c1c"/>
+  <!-- nose: prominent, rounded tip -->
+  <path d="M118 112 Q115 132 110 142 Q114 150 120 150 Q126 150 130 142 Q125 132 122 112 Z" fill="#dfa477"/>
+  <!-- nasolabial hints -->
+  <path d="M102 148 Q106 156 112 160" stroke="#d29a70" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+  <path d="M138 148 Q134 156 128 160" stroke="#d29a70" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+  <!-- mouth: thin, faint asymmetric smile -->
+  <path d="M104 164 Q120 172 136 164 Q120 168 104 164 Z" fill="#b0725c"/>
+  <path d="M104 164 Q120 173 136 164" stroke="#9c6350" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- chin crease -->
+  <path d="M112 176 Q120 180 128 176" stroke="#d29a70" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>
