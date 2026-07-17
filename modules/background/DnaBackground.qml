@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell.Services.UPower
+import qs.services
 
 // Procedural animated DNA wallpaper (assets/shaders/dna.frag).
 // Cost control: the shader renders into a half-resolution layer texture
@@ -20,11 +21,19 @@ Item {
     // render at 60 fps
     signal frameAdvanced()
 
+    // Accent trio for the shader: theme primary or the user's colour, with
+    // deep/hot variants derived in HSV so any hue keeps the original red
+    // palette's contrast (defaults land on the old 93000a/ff5449/ffc4b8)
+    readonly property color accent: ShellPrefs.dnaUseThemeColor ? Colours.palette.m3primary : ShellPrefs.dnaCustomColor
+
     ShaderEffect {
         id: fx
 
         property real uTime: 0
         readonly property real uAspect: width / Math.max(1, height)
+        readonly property color uColMain: root.accent
+        readonly property color uColDeep: Qt.hsva(root.accent.hsvHue, Math.min(1, root.accent.hsvSaturation * 1.4), root.accent.hsvValue * 0.58, 1)
+        readonly property color uColHot: Qt.hsva(root.accent.hsvHue, root.accent.hsvSaturation * 0.39, Math.min(1, root.accent.hsvValue * 1.0), 1)
 
         anchors.fill: parent
         fragmentShader: Qt.resolvedUrl("../../assets/shaders/dna.frag.qsb")

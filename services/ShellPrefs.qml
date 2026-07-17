@@ -17,6 +17,11 @@ Singleton {
     // end; false = regular-size logo inside the pill with normal rounding
     readonly property bool barLogoEndcap: props.barLogoEndcap
 
+    // Animated DNA background (shown when no image wallpaper is set)
+    readonly property bool dnaEnabled: props.dnaEnabled
+    readonly property bool dnaUseThemeColor: props.dnaUseThemeColor
+    readonly property string dnaCustomColor: props.dnaCustomColor
+
     function setBarLogoEndcap(value: bool): void {
         if (value === props.barLogoEndcap)
             return;
@@ -24,9 +29,33 @@ Singleton {
         save();
     }
 
+    function setDnaEnabled(value: bool): void {
+        if (value === props.dnaEnabled)
+            return;
+        props.dnaEnabled = value;
+        save();
+    }
+
+    function setDnaUseThemeColor(value: bool): void {
+        if (value === props.dnaUseThemeColor)
+            return;
+        props.dnaUseThemeColor = value;
+        save();
+    }
+
+    function setDnaCustomColor(value: string): void {
+        if (value === props.dnaCustomColor)
+            return;
+        props.dnaCustomColor = value;
+        save();
+    }
+
     function save(): void {
         store.setText(JSON.stringify({
-            barLogoEndcap: props.barLogoEndcap
+            barLogoEndcap: props.barLogoEndcap,
+            dnaEnabled: props.dnaEnabled,
+            dnaUseThemeColor: props.dnaUseThemeColor,
+            dnaCustomColor: props.dnaCustomColor
         }, null, 2) + "\n");
     }
 
@@ -34,6 +63,9 @@ Singleton {
         id: props
 
         property bool barLogoEndcap: true
+        property bool dnaEnabled: true
+        property bool dnaUseThemeColor: true
+        property string dnaCustomColor: "#ff5449"
     }
 
     FileView {
@@ -51,6 +83,9 @@ Singleton {
                 return;
             }
             props.barLogoEndcap = saved.barLogoEndcap ?? true;
+            props.dnaEnabled = saved.dnaEnabled ?? true;
+            props.dnaUseThemeColor = saved.dnaUseThemeColor ?? true;
+            props.dnaCustomColor = saved.dnaCustomColor ?? "#ff5449";
         }
         onFileChanged: reload()
     }

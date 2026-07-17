@@ -46,7 +46,7 @@ Variants {
                 asynchronous: true
 
                 anchors.fill: parent
-                active: !Config.background.wallpaperEnabled
+                active: !Config.background.wallpaperEnabled && ShellPrefs.dnaEnabled
 
                 sourceComponent: DnaBackground {}
             }

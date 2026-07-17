@@ -194,5 +194,39 @@ PageBase {
             checked: !Colours.light
             onToggled: Colours.setMode(checked ? "dark" : "light")
         }
+
+        SectionHeader {
+            text: qsTr("Animated background")
+        }
+
+        ToggleRow {
+            first: true
+            text: qsTr("DNA helix")
+            subtext: qsTr("Procedural animated wallpaper when no image wallpaper is set")
+            checked: ShellPrefs.dnaEnabled
+            onToggled: ShellPrefs.setDnaEnabled(checked)
+        }
+
+        ToggleRow {
+            last: ShellPrefs.dnaUseThemeColor
+            text: qsTr("Use theme colour")
+            subtext: qsTr("Follow the colour scheme's primary accent")
+            checked: ShellPrefs.dnaUseThemeColor
+            enabled: ShellPrefs.dnaEnabled
+            onToggled: ShellPrefs.setDnaUseThemeColor(checked)
+        }
+
+        TextRow {
+            last: true
+            visible: !ShellPrefs.dnaUseThemeColor
+            label: qsTr("Custom colour")
+            subtext: qsTr("Hex, e.g. #3ba55c — deep and highlight shades derive from it")
+            placeholder: "#ff5449"
+            value: ShellPrefs.dnaCustomColor
+            onCommitted: v => {
+                if (/^#[0-9a-fA-F]{6}$/.test(v))
+                    ShellPrefs.setDnaCustomColor(v);
+            }
+        }
     }
 }

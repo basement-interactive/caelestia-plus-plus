@@ -12,14 +12,16 @@ layout(std140, binding = 0) uniform buf {
     float qt_Opacity;
     float uTime;
     float uAspect;
+    vec4 uColDeep;
+    vec4 uColMain;
+    vec4 uColHot;
 };
 
 const float PI = 3.14159265;
 
-// Scheme accents: m3primaryContainer, m3primary, hot highlight
-const vec3 C_DEEP = vec3(0.576, 0.000, 0.039); // 93000a
-const vec3 C_MAIN = vec3(1.000, 0.329, 0.286); // ff5449
-const vec3 C_HOT  = vec3(1.000, 0.769, 0.722); // ffc4b8
+// Accent trio comes in as uniforms (theme primary or a user colour;
+// deep/hot are derived in DnaBackground.qml) — defaults match the old
+// 93000a / ff5449 / ffc4b8 constants.
 
 float hash(vec2 p) {
     p = fract(p * vec2(234.34, 435.345));
@@ -52,8 +54,8 @@ vec3 helix(vec2 p, float t, float amp, float thick, float glowK, float bright) {
     core2 *= 1.0 - core1 * front1 * 0.85;
     core1 *= 1.0 - core2 * (1.0 - front1) * 0.85;
 
-    vec3 c1 = mix(C_DEEP, C_MAIN, dp1) + C_HOT * pow(dp1, 3.0) * 0.55;
-    vec3 c2 = mix(C_DEEP, C_MAIN, dp2) + C_HOT * pow(dp2, 3.0) * 0.55;
+    vec3 c1 = mix(uColDeep.rgb, uColMain.rgb, dp1) + uColHot.rgb * pow(dp1, 3.0) * 0.55;
+    vec3 c2 = mix(uColDeep.rgb, uColMain.rgb, dp2) + uColHot.rgb * pow(dp2, 3.0) * 0.55;
 
     vec3 col = c1 * (core1 * (0.5 + 0.9 * dp1) + glow1 * 0.35 * (0.3 + 0.7 * dp1))
              + c2 * (core2 * (0.5 + 0.9 * dp2) + glow2 * 0.35 * (0.3 + 0.7 * dp2));
@@ -67,7 +69,7 @@ vec3 helix(vec2 p, float t, float amp, float thick, float glowK, float bright) {
     float rcore = smoothstep(thick * 0.65, thick * 0.22, rx) * inside;
     float sep = smoothstep(0.15, 0.55, (ymax - ymin) / (2.0 * amp));
     float h = hash(vec2(floor(cell), 17.0));   // per-pair tint variation
-    vec3 rcol = mix(C_DEEP * 1.7, C_MAIN * 0.85, 0.3 + 0.5 * h);
+    vec3 rcol = mix(uColDeep.rgb * 1.7, uColMain.rgb * 0.85, 0.3 + 0.5 * h);
     col += rcol * rcore * sep * 0.8;
 
     return col * bright;
@@ -86,7 +88,7 @@ void main() {
     float r = length(p);
     vec3 col = mix(vec3(0.051, 0.033, 0.035), vec3(0.014, 0.008, 0.010),
                    smoothstep(0.15, 0.85, r));
-    col += vec3(0.085, 0.012, 0.016) * exp(-q.y * q.y * 9.0);
+    col += uColMain.rgb * 0.08 * exp(-q.y * q.y * 9.0);
 
     // far helix: parallax depth layer — smaller, slower, dim
     vec2 q2 = R * (p * 1.9 + vec2(0.35, 0.22));
@@ -102,7 +104,7 @@ void main() {
     vec2 off = vec2(hash(id + 3.1), hash(id + 7.7)) - 0.5;
     float dd = length(fract(g) - 0.5 - off * 0.7);
     float tw = 0.5 + 0.5 * sin(t * (0.4 + h1 * 0.8) + h1 * 40.0);
-    col += C_MAIN * exp(-dd * dd * 260.0) * tw * step(0.8, h1) * 0.10;
+    col += uColMain.rgb * exp(-dd * dd * 260.0) * tw * step(0.8, h1) * 0.10;
 
     // soft rolloff so stacked glow saturates gracefully, dither kills banding
     col = col / (1.0 + col * 0.35);

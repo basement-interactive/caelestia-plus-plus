@@ -42,6 +42,7 @@ Item {
     StyledRect {
         id: highlight
 
+        visible: Config.bar.workspaces.activeIndicator
         x: root.hPadding + (root.activeWs - root.groupStart) * root.cellWidth + (root.cellWidth - width) / 2
         anchors.verticalCenter: parent.verticalCenter
         implicitWidth: 24
@@ -77,7 +78,9 @@ Item {
                 StyledText {
                     anchors.centerIn: parent
                     text: cell.ws
-                    color: cell.isActive ? Colours.palette.m3onPrimary : root.occupied[cell.ws] ? Colours.palette.m3primary : Colours.palette.m3outline
+                    // Without the sliding squircle, the active number carries
+                    // the accent itself instead of sitting on it
+                    color: cell.isActive ? (Config.bar.workspaces.activeIndicator ? Colours.palette.m3onPrimary : Colours.palette.m3primary) : root.occupied[cell.ws] ? Colours.palette.m3primary : Colours.palette.m3outline
                     font.weight: cell.isActive ? 700 : 500
 
                     Behavior on color {
