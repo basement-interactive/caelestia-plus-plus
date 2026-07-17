@@ -32,6 +32,7 @@ RowLayout {
     }
 
     function checkPopout(x: real): void {
+        popouts.lastCheckX = x;
         const ch = childAt(x, height / 2) as EntryWrapper;
 
         if (ch?.entryId !== "tray")

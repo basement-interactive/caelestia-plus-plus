@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Io
 import Quickshell.Wayland
 import Caelestia.Config
 import qs.components
@@ -26,6 +27,9 @@ Item {
     property alias currentName: popoutState.currentName
     property alias hasCurrent: popoutState.hasCurrent
     property real currentCenter
+    // Last x Bar.checkPopout received — diagnostic breadcrumb for the
+    // `popouts` IPC below; -1 means hover events never reach the bar
+    property real lastCheckX: -1
 
     property string detachedMode
     property string queuedMode
@@ -53,6 +57,36 @@ Item {
     function close(): void {
         hasCurrent = false;
         detachedMode = "";
+    }
+
+    // Remote diagnosis for dead hover popouts:
+    //   qs -c caelestia ipc call popouts open network   force a popout open
+    //   qs -c caelestia ipc call popouts state          where the chain stops
+    LazyLoader {
+        active: root.screen === Quickshell.screens[0]
+
+        IpcHandler {
+            target: "popouts"
+
+            function open(name: string): void {
+                root.currentCenter = root.screen.width / 2;
+                root.currentName = name;
+                root.hasCurrent = true;
+            }
+
+            function close(): void {
+                root.close();
+            }
+
+            function state(): string {
+                return JSON.stringify({
+                    hasCurrent: root.hasCurrent,
+                    currentName: root.currentName,
+                    lastCheckX: root.lastCheckX,
+                    statusIconsPopouts: root.dummy.Config.bar.popouts.statusIcons
+                });
+            }
+        }
     }
 
     implicitWidth: nonAnimWidth
