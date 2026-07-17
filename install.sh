@@ -15,7 +15,9 @@ curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
     grep -o 'https://[^"]*\.pkg\.tar\.zst' | sort -u > "$tmp/urls"
 [[ -s $tmp/urls ]] || { echo "no package assets on the latest release"; exit 1; }
 while read -r url; do
-    curl -fL -o "$tmp/$(basename "$url")" "$url"
+    # GitHub asset URLs encode '+' as %2B; decode so filename globs match
+    fname=$(basename "$url" | sed 's/%2B/+/g')
+    curl -fL -o "$tmp/$fname" "$url"
 done < "$tmp/urls"
 
 deps=$(for pkg in "$tmp"/*.pkg.tar.zst; do
