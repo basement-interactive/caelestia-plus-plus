@@ -72,7 +72,7 @@ Scope {
             id: card
 
             anchors.centerIn: parent
-            implicitWidth: 460
+            implicitWidth: 520
             implicitHeight: core.implicitHeight + Tokens.padding.small * 2
 
             radius: Tokens.rounding.large
@@ -172,9 +172,11 @@ Scope {
                                     Layout.fillWidth: true
 
                                     StyledText {
+                                        width: parent.width
                                         text: row.modelData.name
                                         color: Colours.palette.m3onSurface
                                         font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
+                                        wrapMode: Text.WordWrap
                                     }
 
                                     StyledText {

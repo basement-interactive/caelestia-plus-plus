@@ -408,9 +408,11 @@ Scope {
                                 Layout.fillWidth: true
 
                                 StyledText {
+                                    width: parent.width
                                     text: checkRow.modelData.name
                                     color: Colours.palette.m3onSurface
                                     font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
+                                    wrapMode: Text.WordWrap
                                 }
 
                                 StyledText {
