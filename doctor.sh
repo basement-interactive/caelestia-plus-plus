@@ -33,6 +33,12 @@ pass "$(hyprctl version 2>/dev/null | head -1 || echo 'hyprctl unavailable')"
 pass "quickshell binary: $(pacman -Qo /usr/bin/qs 2>/dev/null || echo 'unknown owner')"
 pass "qt: $(pacman -Q qt6-base qt6-declarative qt6-wayland 2>/dev/null | tr '\n' ' ')"
 
+echo "--- environment"
+command -v powerprofilesctl >/dev/null 2>&1 && pass "power-profiles-daemon installed" \
+    || warn "power-profiles-daemon missing — power profile toggles disabled, shell logs a dbus warning at start"
+[[ -f $HOME/.face ]] && pass "avatar at ~/.face" \
+    || warn "no ~/.face — dashboard avatar shows placeholder (click it in the dashboard to set one)"
+
 echo "--- shell process"
 if pgrep -f 'qs -c caelestia' >/dev/null; then
     pass "shell running"

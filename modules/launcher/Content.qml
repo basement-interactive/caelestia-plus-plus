@@ -33,7 +33,7 @@ Item {
         anchors.bottomMargin: root.padding
 
         transform: Translate {
-            y: (1 - root.openProgress) * Tokens.padding.large
+            y: (1 - root.openProgress) * root.Tokens.padding.large
         }
 
         StyledRect {

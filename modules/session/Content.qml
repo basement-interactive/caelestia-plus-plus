@@ -118,7 +118,7 @@ Column {
         transform: Translate {
             id: slide
 
-            x: Tokens.padding.large
+            x: root.Tokens.padding.large
         }
 
         Behavior on scale {

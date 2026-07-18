@@ -33,7 +33,7 @@ Item {
             transform: Translate {
                 id: idleEnter
 
-                y: Tokens.padding.medium
+                y: idleInhibit.Tokens.padding.medium
             }
         }
 
@@ -50,7 +50,7 @@ Item {
             transform: Translate {
                 id: recordEnter
 
-                y: Tokens.padding.medium
+                y: record.Tokens.padding.medium
             }
         }
 
@@ -66,7 +66,7 @@ Item {
             transform: Translate {
                 id: togglesEnter
 
-                y: Tokens.padding.medium
+                y: toggles.Tokens.padding.medium
             }
         }
     }
