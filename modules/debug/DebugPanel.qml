@@ -180,7 +180,7 @@ Scope {
 
                     // Non-interactive so mouse drags select text in the
                     // TextEdit instead of flicking; scrolling is wheel +
-                    // scrollbar only
+                    // scrollbar only (the wheel catcher sits on top)
                     Flickable {
                         id: logView
 
@@ -202,11 +202,6 @@ Scope {
                         onContentHeightChanged: {
                             if (stick)
                                 contentY = Math.max(0, contentHeight - height);
-                        }
-
-                        WheelHandler {
-                            target: null
-                            onWheel: event => logView.scrollBy(event.angleDelta.y)
                         }
 
                         StyledScrollBar.vertical: StyledScrollBar {
@@ -263,6 +258,16 @@ Scope {
                                 }
                             }
                         }
+                    }
+
+                    // Wheel catcher above the text: MouseArea sees scroll
+                    // from both mouse wheels and touchpads (WheelHandler
+                    // defaults to mouse-only devices), and with no accepted
+                    // buttons every press falls through to text selection
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton
+                        onWheel: wheel => logView.scrollBy(wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y : wheel.angleDelta.y)
                     }
 
                     StyledText {
