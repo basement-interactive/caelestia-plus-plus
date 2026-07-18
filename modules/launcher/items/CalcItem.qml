@@ -33,7 +33,7 @@ Item {
     transform: Translate {
         id: enterSlide
 
-        y: Tokens.padding.large
+        y: root.Tokens.padding.large
     }
 
     SequentialAnimation {
