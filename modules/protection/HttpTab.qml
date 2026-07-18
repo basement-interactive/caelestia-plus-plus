@@ -50,6 +50,7 @@ Item {
     }
 
     onSelectedIdChanged: if (selectedId) Http.requestDetail(selectedId)
+    Component.onCompleted: Http.enumerateApps()
 
     ColumnLayout {
         anchors.fill: parent
@@ -114,7 +115,7 @@ Item {
 
             IconTextButton {
                 icon: "lan"
-                text: qsTr("Route system apps")
+                text: qsTr("All system apps")
                 inactiveColour: Http.systemProxy ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHigh
                 inactiveOnColour: Http.systemProxy ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
                 onClicked: Http.setSystemProxy(!Http.systemProxy)
@@ -125,9 +126,141 @@ Item {
             }
 
             IconButton {
+                icon: "refresh"
+                type: IconButton.Tonal
+                onClicked: Http.enumerateApps()
+            }
+
+            IconButton {
                 icon: "delete_sweep"
                 type: IconButton.Tonal
                 onClicked: Http.clear()
+            }
+        }
+
+        // -- Per-app capture: pick running apps to route through the proxy --- #
+        ColumnLayout {
+            Layout.fillWidth: true
+            visible: Http.running && root.selectedId === ""
+            spacing: Tokens.spacing.small
+
+            StyledText {
+                Layout.fillWidth: true
+                text: Http.selectedApps.length ? qsTr("Capturing %1 selected app%2").arg(Http.selectedApps.length).arg(Http.selectedApps.length === 1 ? "" : "s") : qsTr("Capture specific apps (routes just these, VPN-safe)")
+                color: Http.selectedApps.length ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                font: Tokens.font.body.small
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Tokens.spacing.small
+
+                Repeater {
+                    model: ScriptModel {
+                        values: Http.runningApps
+                    }
+
+                    StyledRect {
+                        id: chip
+
+                        required property var modelData
+                        readonly property bool on: Http.selectedApps.includes(chip.modelData.comm)
+
+                        implicitWidth: chipRow.implicitWidth + Tokens.padding.large * 2
+                        implicitHeight: chipRow.implicitHeight + Tokens.padding.small * 2
+                        radius: Tokens.rounding.full
+                        color: chip.on ? Colours.palette.m3primary : Colours.palette.m3surfaceContainerHigh
+                        border.width: 1
+                        border.color: chip.on ? "transparent" : Qt.alpha(Colours.palette.m3outlineVariant, 0.3)
+                        scale: chipLayer.pressed ? 0.96 : 1
+
+                        Behavior on color {
+                            CAnim {}
+                        }
+                        Behavior on scale {
+                            Anim {
+                                type: chipLayer.pressed ? Anim.FastSpatial : Anim.Emphasized
+                            }
+                        }
+
+                        StateLayer {
+                            id: chipLayer
+                            color: chip.on ? Colours.palette.m3onPrimary : Colours.palette.m3onSurfaceVariant
+                            onClicked: {
+                                const sel = Http.selectedApps.slice();
+                                const i = sel.indexOf(chip.modelData.comm);
+                                if (i >= 0)
+                                    sel.splice(i, 1);
+                                else
+                                    sel.push(chip.modelData.comm);
+                                Http.setSelectedApps(sel);
+                            }
+                        }
+
+                        Row {
+                            id: chipRow
+                            anchors.centerIn: parent
+                            spacing: Tokens.spacing.small
+
+                            MaterialIcon {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: chip.on
+                                text: "check"
+                                color: Colours.palette.m3onPrimary
+                                fontStyle: Tokens.font.icon.small
+                            }
+
+                            StyledText {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: chip.modelData.cls
+                                color: chip.on ? Colours.palette.m3onPrimary : Colours.palette.m3onSurface
+                                font: Tokens.font.body.builders.small.weight(Font.Medium).build()
+                            }
+                        }
+                    }
+                }
+
+                StyledText {
+                    visible: Http.runningApps.length === 0
+                    text: qsTr("No running apps found — hit refresh")
+                    color: Colours.palette.m3outline
+                    font: Tokens.font.body.small
+                }
+            }
+
+            // One-time eBPF setup needed before per-app capture works.
+            StyledRect {
+                Layout.fillWidth: true
+                visible: Http.selectedApps.length > 0 && !Http.localReady
+                implicitHeight: setupRow.implicitHeight + Tokens.padding.medium * 2
+                radius: Tokens.rounding.small
+                color: Qt.alpha(root.warn, 0.12)
+
+                RowLayout {
+                    id: setupRow
+                    anchors.fill: parent
+                    anchors.margins: Tokens.padding.medium
+                    spacing: Tokens.spacing.medium
+
+                    MaterialIcon {
+                        text: "bolt"
+                        color: root.warn
+                    }
+
+                    StyledText {
+                        Layout.fillWidth: true
+                        text: qsTr("Per-app capture needs a one-time permission grant for the eBPF redirector.")
+                        color: Colours.palette.m3onSurfaceVariant
+                        font: Tokens.font.body.small
+                        wrapMode: Text.WordWrap
+                    }
+
+                    TextButton {
+                        text: qsTr("Enable")
+                        type: TextButton.Tonal
+                        onClicked: Http.enablePerApp()
+                    }
+                }
             }
         }
 

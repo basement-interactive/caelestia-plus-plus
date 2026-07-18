@@ -30,18 +30,61 @@ Singleton {
     property bool caTrusted: false        // CA in the system trust store
     property bool systemProxy: false      // gsettings proxy pointed at us
 
+    // Per-app capture via mitmproxy's eBPF local mode. Needs the redirector
+    // helper to hold caps; one-time setcap (localReady) then it runs as us.
+    property string redirectorPath: ""
+    property bool localReady: false       // redirector has the eBPF caps
+    property var runningApps: []          // [{cls, pid, comm, title}]
+    property var selectedApps: []         // process names for the local spec
+
     // Newest-first capped flow list + the currently open flow's detail.
     property var flows: []
     property var detail: null
     readonly property int heldCount: flows.filter(f => f.held).length
     readonly property int maxFlows: 300
 
+    // local mode only once the redirector is capability-granted, so selecting
+    // an app before the one-time setup never triggers mitmproxy's own polkit
+    // prompt (which would appear behind this overlay panel).
+    readonly property bool localActive: localReady && selectedApps.length > 0
+
+    function _command(): var {
+        const modes = ["--mode", `regular@${root.port}`];
+        if (root.localActive)
+            modes.push("--mode", `local:${root.selectedApps.join(",")}`);
+        return ["mitmdump", "-q", "--listen-host", "127.0.0.1", "-s",
+            Quickshell.shellPath("system/redproxy/addon.py")].concat(modes);
+    }
+
     function start(): void {
         if (proc.running)
             return;
         flows = [];
         detail = null;
+        proc.command = _command();
         proc.running = true;
+    }
+
+    // Changing which apps are captured means relaunching mitmdump (modes are
+    // fixed at start). Only relaunch when local mode is actually usable —
+    // otherwise the selection just arms the "Enable" prompt.
+    function setSelectedApps(names: var): void {
+        const wasActive = root.localActive;
+        root.selectedApps = names;
+        if (proc.running && (root.localActive || wasActive)) {
+            proc.running = false;
+            restartTimer.restart();
+        }
+    }
+
+    Timer {
+        id: restartTimer
+        interval: 400
+        onTriggered: root.start()
+    }
+
+    function enumerateApps(): void {
+        appEnum.running = true;
     }
 
     function stop(): void {
@@ -139,7 +182,7 @@ Singleton {
     Process {
         id: proc
 
-        command: ["mitmdump", "-q", "--listen-host", "127.0.0.1", "-p", `${root.port}`, "-s", Quickshell.shellPath("system/redproxy/addon.py")]
+        command: root._command()  // replaced per-start with the current modes
         environment: ({
                 REDPROXY_SOCK: root.sockPath
             })
@@ -199,13 +242,81 @@ Singleton {
     Process {
         id: probeProc
 
-        command: ["sh", "-c", `command -v mitmdump >/dev/null && echo inst; [ -e /etc/ca-certificates/trust-source/anchors/mitmproxy.crt ] && echo ca; [ "$(gsettings get org.gnome.system.proxy mode 2>/dev/null)" = "'manual'" ] && echo sysproxy; true`]
+        command: ["sh", "-c", `command -v mitmdump >/dev/null && echo inst
+[ -e /etc/ca-certificates/trust-source/anchors/mitmproxy.crt ] && echo ca
+[ "$(gsettings get org.gnome.system.proxy mode 2>/dev/null)" = "'manual'" ] && echo sysproxy
+rp=$(python3 -c 'import mitmproxy_linux; print(mitmproxy_linux.executable_path())' 2>/dev/null)
+[ -n "$rp" ] && echo "redir|$rp"
+[ -n "$rp" ] && getcap "$rp" 2>/dev/null | grep -qi cap && echo localready
+true`]
         stdout: StdioCollector {
             onStreamFinished: {
                 root.installed = text.includes("inst");
                 root.caTrusted = text.includes("ca");
                 root.systemProxy = text.includes("sysproxy");
+                root.localReady = text.includes("localready");
+                const m = text.match(/redir\|(.+)/);
+                root.redirectorPath = m ? m[1].trim() : "";
             }
+        }
+    }
+
+    // App picker source: running Hyprland toplevels with their pid → process
+    // name (the local-mode spec matches by process name, catching an app's
+    // helper processes too).
+    Process {
+        id: appEnum
+
+        command: ["sh", "-c", `hyprctl clients -j 2>/dev/null | python3 -c "
+import json, sys
+for c in json.load(sys.stdin):
+    pid = c.get('pid', 0); cls = c.get('class', ''); title = c.get('title', '')
+    if pid <= 0 or not cls: continue
+    try: comm = open(f'/proc/{pid}/comm').read().strip()
+    except OSError: comm = cls
+    print('|'.join((cls, str(pid), comm, title[:48])).replace(chr(10), ' '))
+"`]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const seen = new Set();
+                const apps = [];
+                for (const line of text.trim().split("\n")) {
+                    if (!line)
+                        continue;
+                    const f = line.split("|");
+                    if (f.length < 3 || seen.has(f[2]))
+                        continue;
+                    seen.add(f[2]);
+                    apps.push({cls: f[0], pid: parseInt(f[1], 10), comm: f[2], title: f[3] ?? ""});
+                }
+                root.runningApps = apps;
+            }
+        }
+    }
+
+    // One-time: give the eBPF redirector the caps it needs, so per-app capture
+    // then runs as the user with no prompt (instead of a polkit prompt each
+    // time mitmproxy would self-elevate).
+    function enablePerApp(): void {
+        if (!root.redirectorPath)
+            return;
+        enableProc.running = true;
+        Toaster.toast(qsTr("Enabling per-app capture"), qsTr("Enter your password — one-time setup"), "key");
+    }
+
+    Process {
+        id: enableProc
+        command: ["timeout", "120", "pkexec", "setcap", "cap_bpf,cap_net_admin,cap_sys_admin,cap_sys_resource+ep", root.redirectorPath]
+        onExited: code => {
+            if (code === 0)
+                root.localReady = true; // set directly; probe() is async
+            root.probe();
+            // Apply the pending app selection now that local mode is usable.
+            if (code === 0 && proc.running && root.selectedApps.length) {
+                proc.running = false;
+                restartTimer.restart();
+            }
+            Toaster.toast(code === 0 ? qsTr("Per-app capture ready") : qsTr("Setup failed"), code === 0 ? qsTr("Routing the selected apps through the proxy") : qsTr("See the debug console"), code === 0 ? "task_alt" : "warning");
         }
     }
 

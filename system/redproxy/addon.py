@@ -23,6 +23,9 @@ import os
 from mitmproxy import ctx, http
 
 SOCK = os.environ.get("REDPROXY_SOCK") or f"{os.environ.get('XDG_RUNTIME_DIR', '/tmp')}/redproxy.sock"
+# When intercepting selected apps mitmdump runs as root (eBPF local mode); the
+# socket must then be reachable by the user's shell.
+SOCK_GID = int(os.environ.get("REDPROXY_GID") or -1)
 MAX_BODY = 256 * 1024  # cap bodies streamed to the UI
 
 
@@ -161,6 +164,10 @@ class Redproxy:
         elif t == "clear":
             self.flows = {k: v for k, v in self.flows.items() if k in self.held}
             self._broadcast({"t": "cleared"})
+        elif t == "shutdown":
+            # Clean self-exit. Used to stop a root (local-mode) mitmdump, which
+            # the unprivileged shell cannot signal (setuid child).
+            ctx.master.shutdown()
 
     def _release(self, fid: str) -> None:
         flow = self.held.pop(fid, None)
@@ -176,7 +183,14 @@ class Redproxy:
         except FileNotFoundError:
             pass
         server = await asyncio.start_unix_server(self._client, path=SOCK)
-        os.chmod(SOCK, 0o600)
+        if SOCK_GID >= 0:
+            try:
+                os.chown(SOCK, 0, SOCK_GID)
+                os.chmod(SOCK, 0o660)
+            except OSError:
+                os.chmod(SOCK, 0o600)
+        else:
+            os.chmod(SOCK, 0o600)
         async with server:
             await server.serve_forever()
 
