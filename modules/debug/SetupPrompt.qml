@@ -11,9 +11,11 @@ import qs.components.controls
 import qs.services
 
 // Centered prompt shown once after startup when the system scan finds
-// packages the shell needs but the machine lacks. Install goes through
-// pkexec; "Later" remembers the current set and stays quiet until a new
-// package goes missing. Details opens the debug window's scan tab.
+// something the machine needs fixed on its own: packages the shell wants
+// but lacks, or privileged root halves installed from an older Caelestia++.
+// One "Fix now" runs everything through a single pkexec (one password);
+// "Later" remembers the current set and stays quiet until something new
+// appears. Details opens the debug window's scan tab.
 Scope {
     id: root
 
@@ -129,7 +131,7 @@ Scope {
                             Layout.fillWidth: true
 
                             StyledText {
-                                text: qsTr("Missing packages")
+                                text: qsTr("System needs attention")
                                 color: Colours.palette.m3onSurface
                                 font: Tokens.font.body.builders.large.weight(Font.Bold).build()
                             }
@@ -150,7 +152,7 @@ Scope {
 
                         Repeater {
                             model: ScriptModel {
-                                values: SystemCheck.results.filter(r => r.fixType === "install")
+                                values: SystemCheck.promptItems
                             }
 
                             RowLayout {
@@ -162,7 +164,7 @@ Scope {
                                 spacing: Tokens.spacing.medium
 
                                 MaterialIcon {
-                                    text: row.modelData.status === "fail" ? "error" : "warning"
+                                    text: row.modelData.status === "fail" ? "error" : row.modelData.fixType === "roothalf" ? "upgrade" : "warning"
                                     color: row.modelData.status === "fail" ? "#ff5c5c" : "#ffc233"
                                 }
 
@@ -170,9 +172,9 @@ Scope {
                                     Layout.fillWidth: true
 
                                     StyledText {
-                                        text: row.modelData.fixData
+                                        text: row.modelData.name
                                         color: Colours.palette.m3onSurface
-                                        font: Tokens.font.mono.small
+                                        font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
                                     }
 
                                     StyledText {
@@ -214,10 +216,10 @@ Scope {
                         }
 
                         TextButton {
-                            text: SystemCheck.busyId === "all" ? qsTr("Installing…") : qsTr("Install now")
+                            text: SystemCheck.busyId === "all" ? qsTr("Fixing…") : qsTr("Fix now")
                             disabled: SystemCheck.busyId !== ""
                             onClicked: {
-                                SystemCheck.installAllMissing();
+                                SystemCheck.fixAllPrompted();
                                 SystemCheck.dismissPrompt();
                             }
                         }

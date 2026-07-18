@@ -29,9 +29,16 @@ Singleton {
     readonly property int problemCount: results.filter(r => r.status === "warn" || r.status === "fail").length
     readonly property var missingPackages: results.filter(r => r.fixType === "install").map(r => r.fixData)
 
+    // Rows that warrant the unprompted startup dialog: missing packages and
+    // outdated (already installed) privileged halves
+    readonly property var promptItems: results.filter(r => r.prompt)
+    readonly property var outdatedRootHalves: results.filter(r => r.fixType === "roothalf" && r.prompt).map(r => r.fixData)
+
     property bool promptOpen: false
     readonly property string statePath: `${Paths.state}/systemcheck.json`
     property var dismissedPackages: []
+    property var dismissedRootHalves: ({})
+    property var _verState: ({})
 
     // Runtime tools the shell calls, with the Arch package that provides
     // them and what breaks without them
@@ -57,7 +64,14 @@ Singleton {
         probe.command = ["sh", "-c", `for b in ${bins}; do command -v "$b" >/dev/null 2>&1 && echo "bin|$b|ok" || echo "bin|$b|missing"; done
 systemctl is-active -q power-profiles-daemon 2>/dev/null && echo "ppd|active" || echo "ppd|inactive"
 [ -f "$HOME/.face" ] && echo "face|ok" || echo "face|missing"
-grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ignpkg|missing"`];
+grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ignpkg|missing"
+for f in max-perf anti-heat dynamic bed-mode; do
+  repo=$(grep -m1 '^root_half_version=' "${Quickshell.shellDir}/system/$f/install.sh" 2>/dev/null | cut -d= -f2)
+  [ -n "$repo" ] || repo=0
+  inst=$(cat "/etc/caelestia/$f.version" 2>/dev/null || echo 0)
+  if systemctl is-enabled -q "$f-sync.path" 2>/dev/null; then en=1; else en=0; fi
+  echo "ver|$f|$repo|$inst|$en"
+done`];
         probe.running = true;
     }
 
@@ -100,18 +114,44 @@ grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ig
         fixProc.running = true;
     }
 
+    // Everything the startup prompt covers in a single pkexec (one password):
+    // missing packages, then each outdated privileged half's installer
+    function fixAllPrompted(): void {
+        if (busyId)
+            return;
+        const cmds = [];
+        if (missingPackages.length)
+            cmds.push("pacman -S --needed --noconfirm " + missingPackages.join(" "));
+        for (const dir of outdatedRootHalves)
+            cmds.push(`bash '${Quickshell.shellDir}/system/${dir}/install.sh'`);
+        if (!cmds.length)
+            return;
+        busyId = "all";
+        fixProc.command = ["pkexec", "sh", "-c", cmds.join(" && ")];
+        fixProc.running = true;
+    }
+
     function dismissPrompt(): void {
         dismissedPackages = [...new Set(dismissedPackages.concat(missingPackages))];
-        store.setText(JSON.stringify({dismissedPackages: dismissedPackages}, null, 2) + "\n");
+        const halves = Object.assign({}, dismissedRootHalves);
+        for (const dir of outdatedRootHalves)
+            halves[dir] = _verState[dir]?.repo ?? 0;
+        dismissedRootHalves = halves;
+        store.setText(JSON.stringify({dismissedPackages: dismissedPackages, dismissedRootHalves: dismissedRootHalves}, null, 2) + "\n");
         promptOpen = false;
     }
 
     function _finish(out: string): void {
         const flags = {};
+        const vers = {};
         for (const line of out.trim().split("\n")) {
             const parts = line.split("|");
-            flags[parts.length === 3 ? `${parts[0]}.${parts[1]}` : parts[0]] = parts[parts.length - 1];
+            if (parts[0] === "ver")
+                vers[parts[1]] = {repo: parseInt(parts[2], 10) || 0, inst: parseInt(parts[3], 10) || 0, enabled: parts[4] === "1"};
+            else
+                flags[parts.length === 3 ? `${parts[0]}.${parts[1]}` : parts[0]] = parts[parts.length - 1];
         }
+        _verState = vers;
 
         const rows = [];
 
@@ -126,7 +166,8 @@ grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ig
                 status: ok ? "ok" : b.severity,
                 fixType: ok ? "none" : "install",
                 fixData: b.pkg,
-                fixLabel: ok ? "" : qsTr("Install")
+                fixLabel: ok ? "" : qsTr("Install"),
+                prompt: !ok
             });
         }
 
@@ -153,22 +194,50 @@ grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ig
             fixLabel: ShellUpdates.updateAvailable ? qsTr("Update") : ""
         });
 
-        const rootHalves = SysInfo.isLaptop ? [
-            {id: "max-perf", installed: MaxPerf.installed, name: "max-perf", dir: "max-perf"},
-            {id: "anti-heat", installed: AntiHeat.installed, name: "anti-heat", dir: "anti-heat"}
-        ] : [
-            {id: "dynamic", installed: Dynamic.installed, name: "dynamic performance", dir: "dynamic"}
+        // Every feature gets version-checked once its root half is installed;
+        // upgradeOnly gates only the fresh-install suggestion (max-perf and
+        // anti-heat fit any chassis, dynamic targets desktops, bed mode is
+        // ThinkPad-only and installs from the battery popout instead)
+        const rootHalves = [
+            {dir: "max-perf", name: qsTr("max-perf")},
+            {dir: "anti-heat", name: qsTr("anti-heat")},
+            {dir: "dynamic", name: qsTr("dynamic performance"), upgradeOnly: SysInfo.isLaptop},
+            {dir: "bed-mode", name: qsTr("bed mode"), upgradeOnly: true}
         ];
         for (const h of rootHalves) {
-            rows.push({
-                id: `roothalf-${h.id}`,
-                name: h.installed ? qsTr("%1 root half installed").arg(h.name) : qsTr("%1 root half missing").arg(h.name),
-                detail: h.installed ? qsTr("Feature fully available") : qsTr("The %1 feature stays inactive until its privileged half is installed (asks for your password)").arg(h.name),
-                status: h.installed ? "ok" : "warn",
-                fixType: h.installed ? "none" : "roothalf",
-                fixData: h.dir,
-                fixLabel: h.installed ? "" : qsTr("Install")
-            });
+            const v = vers[h.dir] ?? {repo: 0, inst: 0, enabled: false};
+            if (v.enabled && v.repo > v.inst) {
+                rows.push({
+                    id: `roothalf-${h.dir}`,
+                    name: qsTr("%1 root half outdated (v%2, current v%3)").arg(h.name).arg(v.inst).arg(v.repo),
+                    detail: qsTr("The installed privileged half is from an older Caelestia++ — update to get the latest behaviour"),
+                    status: "warn",
+                    fixType: "roothalf",
+                    fixData: h.dir,
+                    fixLabel: qsTr("Update"),
+                    prompt: true
+                });
+            } else if (!v.enabled && !h.upgradeOnly) {
+                rows.push({
+                    id: `roothalf-${h.dir}`,
+                    name: qsTr("%1 root half missing").arg(h.name),
+                    detail: qsTr("The %1 feature stays inactive until its privileged half is installed (asks for your password)").arg(h.name),
+                    status: "warn",
+                    fixType: "roothalf",
+                    fixData: h.dir,
+                    fixLabel: qsTr("Install")
+                });
+            } else if (v.enabled) {
+                rows.push({
+                    id: `roothalf-${h.dir}`,
+                    name: qsTr("%1 root half installed and current").arg(h.name),
+                    detail: qsTr("Feature fully available"),
+                    status: "ok",
+                    fixType: "none",
+                    fixData: "",
+                    fixLabel: ""
+                });
+            }
         }
 
         rows.push({
@@ -208,8 +277,9 @@ grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ig
         lastScan = Qt.formatTime(new Date(), "hh:mm:ss");
         scanning = false;
 
-        const fresh = missingPackages.filter(p => !dismissedPackages.includes(p));
-        if (fresh.length && !DebugConsole.open)
+        const freshPackages = missingPackages.filter(p => !dismissedPackages.includes(p));
+        const freshHalves = outdatedRootHalves.filter(dir => (vers[dir]?.repo ?? 0) > (dismissedRootHalves[dir] ?? 0));
+        if ((freshPackages.length || freshHalves.length) && !DebugConsole.open)
             promptOpen = true;
     }
 
@@ -244,7 +314,9 @@ grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ig
 
         onLoaded: {
             try {
-                root.dismissedPackages = JSON.parse(text()).dismissedPackages ?? [];
+                const saved = JSON.parse(text());
+                root.dismissedPackages = saved.dismissedPackages ?? [];
+                root.dismissedRootHalves = saved.dismissedRootHalves ?? {};
             } catch (e) {}
         }
     }

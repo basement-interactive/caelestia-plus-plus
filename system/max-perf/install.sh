@@ -11,6 +11,11 @@
 # Usage: run as root (pkexec/sudo), directly from the checkout.
 set -euo pipefail
 
+# Bump whenever ANY root-side file of this feature changes; the shell's
+# system scan compares it against /etc/caelestia/max-perf.version and offers the
+# upgrade automatically.
+root_half_version=2
+
 if [[ $EUID -ne 0 ]]; then
     echo "Run as root: sudo $0" >&2
     exit 1
@@ -68,6 +73,9 @@ state_file="$state_dir/max-perf"
 install -d -o "$target_user" -g "$target_user" "$state_dir"
 [[ -f "$state_file" ]] || printf '0\n' > "$state_file"
 chown "$target_user:$target_user" "$state_file"
+
+install -d /etc/caelestia
+echo "$root_half_version" > /etc/caelestia/max-perf.version
 
 systemctl daemon-reload
 systemctl enable --now max-perf-sync.path
