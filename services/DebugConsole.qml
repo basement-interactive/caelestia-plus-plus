@@ -43,9 +43,10 @@ Singleton {
     signal lineAppended(entry: var)
     signal viewReset
 
-    // pipewire's event loop and dbus property sync log every poll iteration;
-    // at debug level they drown everything else, so verbose leaves them out
-    readonly property string verboseRules: "*.debug=true;quickshell.service.pipewire.loop.debug=false;quickshell.dbus.properties.debug=false"
+    // pipewire (loop iterations, link/node churn) and dbus property sync log
+    // constantly at debug level; they drown everything else AND the sheer
+    // read volume can crash `qs log`'s reader thread, so verbose mutes them
+    readonly property string verboseRules: "*.debug=true;quickshell.service.pipewire.debug=false;quickshell.service.pipewire.*.debug=false;quickshell.dbus.properties.debug=false"
     readonly property string quietRules: "*.debug=false"
 
     onVerboseChanged: _restartTail(false)
@@ -155,10 +156,13 @@ Singleton {
     // Runs for the shell's lifetime; restarted only on rule changes, without
     // history (-t 0) so the buffer doesn't get duplicated
     function _restartTail(withHistory: bool): void {
+        _tailStopping = tail.running;
         tail.running = false;
         tail.command = ["qs", "--no-color", "log", "-f", "-t", withHistory ? "200" : "0", "--pid", `${Quickshell.processId}`, "-r", verbose ? verboseRules : quietRules];
         tail.running = true;
     }
+
+    property bool _tailStopping: false
 
     Component.onCompleted: _restartTail(true)
 
@@ -168,6 +172,24 @@ Singleton {
         stdout: SplitParser {
             onRead: data => root._append(data)
         }
+        // `qs log`'s reader thread can crash on a live log under heavy write
+        // volume ("[READER] ERROR ... QThread: Destroyed"), which would end
+        // the feed silently for the rest of the session — revive it instead
+        onExited: {
+            if (root._tailStopping) {
+                root._tailStopping = false;
+                return;
+            }
+            console.warn("caelestia.debugconsole: log tail died, restarting in 2s");
+            tailRevive.restart();
+        }
+    }
+
+    Timer {
+        id: tailRevive
+
+        interval: 2000
+        onTriggered: root._restartTail(false)
     }
 
     Process {

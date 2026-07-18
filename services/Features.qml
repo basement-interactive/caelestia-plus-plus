@@ -53,15 +53,9 @@ Singleton {
             icon: "laptop_windows",
             enabled: props.lidStay
         }
-    ] : [
-        {
-            id: "dynamic",
-            name: qsTr("Dynamic performance"),
-            desc: Dynamic.installing ? qsTr("Setting up the root half…") : Dynamic.installed ? qsTr("Auto-switches balanced/performance from live CPU load") : qsTr("First enable sets up the privileged half (asks for your password)"),
-            icon: "auto_mode",
-            enabled: Dynamic.enabled
-        }
-    ])
+    ] : [])
+    // Dynamic lives in the battery popout's profile row only, on every
+    // chassis — it is a power profile, not a feature mode
     readonly property int activeCount: features.filter(f => f.enabled).length
 
     function toggle(featureId: string): void {
