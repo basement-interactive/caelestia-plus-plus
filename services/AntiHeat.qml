@@ -45,7 +45,9 @@ Singleton {
     Process {
         id: installer
 
-        command: ["pkexec", "bash", `${Quickshell.shellDir}/system/anti-heat/install.sh`]
+        // timeout: with no polkit agent the password prompt never appears
+        // and pkexec would hang this toggle on "installing" forever
+        command: ["timeout", "600", "pkexec", "bash", `${Quickshell.shellDir}/system/anti-heat/install.sh`]
         stdout: SplitParser {
             onRead: data => console.info("anti-heat install:", data)
         }

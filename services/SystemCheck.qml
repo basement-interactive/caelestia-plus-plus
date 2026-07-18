@@ -40,6 +40,10 @@ Singleton {
     // Staged fix awaiting user confirmation: {id, title, summary, commands, exec, kind}
     property var pendingFix: null
 
+    // A root fix cannot even show its password prompt without an agent;
+    // the confirmation cards warn on this instead of hanging silently
+    readonly property bool polkitAgentMissing: results.some(r => r.id === "polkit-agent" && r.status === "fail")
+
     property bool promptOpen: false
     readonly property string statePath: `${Paths.state}/systemcheck.json`
     property var dismissedPackages: []
@@ -72,6 +76,7 @@ Singleton {
         probe.command = ["sh", "-c", `
 for b in ${bins}; do command -v "$b" >/dev/null 2>&1 && echo "bin|$b|ok" || echo "bin|$b|missing"; done
 systemctl is-active -q power-profiles-daemon 2>/dev/null && echo "ppd|active" || echo "ppd|inactive"
+echo "pmconflict|$(pacman -Qq tlp auto-cpufreq laptop-mode-tools 2>/dev/null | tr '\\n' ' ')"
 [ -f "$HOME/.face" ] && echo "face|ok" || echo "face|missing"
 grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ignpkg|missing"
 for f in max-perf anti-heat dynamic bed-mode; do
@@ -170,6 +175,16 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
         pendingFix = null;
     }
 
+    // Kills a fix stuck on e.g. a pkexec prompt that can never appear
+    function cancelRunningFix(): void {
+        if (fixProc.running) {
+            _fixCancelled = true;
+            fixProc.running = false;
+        }
+    }
+
+    property bool _fixCancelled: false
+
     function dismissPrompt(): void {
         dismissedPackages = [...new Set(dismissedPackages.concat(missingPackages))];
         const halves = Object.assign({}, dismissedRootHalves);
@@ -221,12 +236,16 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
             });
         }
 
+        const pmConflicts = (flags.pmconflict?.[0] ?? "").trim();
         if (flags["bin.powerprofilesctl"] === "ok") {
             const active = flags.ppd?.[0] === "active";
-            push("ppd-service", active ? qsTr("power-profiles-daemon running") : qsTr("power-profiles-daemon not running"), qsTr("The daemon behind power profile switching"), active ? "ok" : "warn", active ? null : {
-                fix: Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Enables and starts the power-profiles-daemon system service."), ["systemctl enable --now power-profiles-daemon"]))
+            push("ppd-service", active ? qsTr("power-profiles-daemon running") : qsTr("power-profiles-daemon not running"), active ? qsTr("The daemon behind power profile switching") : pmConflicts ? qsTr("Likely blocked by %1 (see the conflict finding below)").arg(pmConflicts) : qsTr("The daemon behind power profile switching"), active ? "ok" : "warn", active ? null : {
+                fix: Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Unmasks (in case another power tool masked it), enables and starts the power-profiles-daemon system service."), ["systemctl unmask power-profiles-daemon", "systemctl enable --now power-profiles-daemon"]))
             });
         }
+
+        if (pmConflicts)
+            push("pm-conflict", qsTr("Conflicting power manager installed"), qsTr("%1 fights power-profiles-daemon over the same hardware knobs — the daemon often gets masked or fails to start (dbus NoReply). Keep one: either remove %1, or remove power-profiles-daemon. Your call, so no automatic fix.").arg(pmConflicts.trim()), "warn");
 
         // -- Caelestia: updates, privileged halves, config, checkout
         push("shell-updates", ShellUpdates.updateAvailable ? qsTr("Shell %1 commits behind").arg(ShellUpdates.commitsBehind) : qsTr("Shell up to date"), ShellUpdates.updateAvailable ? qsTr("Newer Caelestia++ is on origin/main") : qsTr("Checked against origin/main"), ShellUpdates.updateAvailable ? "warn" : "ok", ShellUpdates.updateAvailable ? {
@@ -377,10 +396,30 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
         stdout: SplitParser {
             onRead: data => console.info("systemcheck fix:", data)
         }
-        onExited: {
+        onExited: code => {
             root.busyId = "";
+            watchdog.stop();
+            if (root._fixCancelled) {
+                root._fixCancelled = false;
+                Toaster.toast(qsTr("Fix cancelled"), qsTr("Nothing further was changed"), "block");
+            } else if (code === 0) {
+                Toaster.toast(qsTr("Fix applied"), qsTr("Rescanning to verify"), "task_alt");
+            } else {
+                Toaster.toast(qsTr("Fix did not complete"), code === 126 || code === 127 ? qsTr("Authentication was dismissed or no polkit agent answered") : qsTr("Exited with code %1 — details in the debug console").arg(code), "warning");
+            }
             root.scan();
         }
+    }
+
+    // pkexec without a reachable polkit agent hangs forever and would leave
+    // every fix button stuck on "Working" — kill runaway fixes after 10min
+    // (long installs are fine, an unanswerable password prompt is not)
+    Timer {
+        id: watchdog
+
+        running: root.busyId !== ""
+        interval: 600000
+        onTriggered: root.cancelRunningFix()
     }
 
     Process {

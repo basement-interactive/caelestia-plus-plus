@@ -248,6 +248,15 @@ Scope {
                             font: Tokens.font.body.small
                             wrapMode: Text.WordWrap
                         }
+
+                        StyledText {
+                            Layout.fillWidth: true
+                            visible: SystemCheck.polkitAgentMissing
+                            text: qsTr("No polkit agent is running — the password prompt cannot appear and this fix would hang. Fix the polkit agent finding first (Details).")
+                            color: "#ff5c5c"
+                            font: Tokens.font.body.small
+                            wrapMode: Text.WordWrap
+                        }
                     }
 
                     RowLayout {

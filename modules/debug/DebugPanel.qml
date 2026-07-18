@@ -335,6 +335,13 @@ Scope {
                     }
 
                     TextButton {
+                        text: qsTr("Cancel fix")
+                        type: TextButton.Tonal
+                        visible: SystemCheck.busyId !== ""
+                        onClicked: SystemCheck.cancelRunningFix()
+                    }
+
+                    TextButton {
                         text: qsTr("Rescan")
                         type: TextButton.Tonal
                         disabled: SystemCheck.scanning
@@ -571,6 +578,15 @@ Scope {
                             visible: (SystemCheck.pendingFix?.exec?.[0] ?? "") === "pkexec"
                             text: qsTr("Runs as root — pkexec will ask for your password.")
                             color: "#ffc233"
+                            font: Tokens.font.body.small
+                            wrapMode: Text.WordWrap
+                        }
+
+                        StyledText {
+                            Layout.fillWidth: true
+                            visible: (SystemCheck.pendingFix?.exec?.[0] ?? "") === "pkexec" && SystemCheck.polkitAgentMissing
+                            text: qsTr("No polkit agent is running — the password prompt cannot appear and this fix would hang. Fix the polkit agent finding first.")
+                            color: "#ff5c5c"
                             font: Tokens.font.body.small
                             wrapMode: Text.WordWrap
                         }
