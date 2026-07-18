@@ -27,7 +27,7 @@ if pacman -Q power-profiles-daemon >/dev/null 2>&1; then
     ok "installed: $(pacman -Q power-profiles-daemon)"
 else
     step "Not installed — installing it now"
-    if pacman -S --needed --noconfirm power-profiles-daemon; then
+    if timeout 300 pacman -S --needed --noconfirm power-profiles-daemon; then
         ok "package installed"
     else
         fail "pacman could not install power-profiles-daemon"
@@ -40,8 +40,8 @@ if systemctl cat power-profiles-daemon.service >/dev/null 2>&1; then
     ok "unit file present"
 else
     step "Unit file missing despite the package — reinstalling to restore it"
-    if pacman -S --noconfirm power-profiles-daemon; then
-        systemctl daemon-reload
+    if timeout 300 pacman -S --noconfirm power-profiles-daemon; then
+        timeout 20 systemctl daemon-reload
         ok "package reinstalled, units reloaded"
     else
         fail "reinstall failed"
@@ -53,7 +53,7 @@ enable_state=$(systemctl is-enabled power-profiles-daemon 2>&1 || true)
 echo "     unit enable state: $enable_state"
 if [ "$enable_state" = "masked" ]; then
     step "Unit is masked (usually another power tool did this) — unmasking"
-    if systemctl unmask power-profiles-daemon; then
+    if timeout 20 systemctl unmask power-profiles-daemon; then
         ok "unmasked"
     else
         fail "could not unmask"
@@ -84,8 +84,18 @@ if [ "$njobs" -gt 0 ]; then
     printf '%s\n' "$jobs" | sed 's/^/     /'
     if printf '%s' "$jobs" | grep -q plymouth-quit-wait; then
         step "plymouth never exited (it waits for a signal the session never sent) — telling it to quit"
-        plymouth quit 2>/dev/null || true
+        # plymouth quit blocks waiting for a hung plymouthd to acknowledge;
+        # give it 5s, then just kill the daemon
+        timeout 5 plymouth quit 2>/dev/null || true
+        if pgrep -x plymouthd >/dev/null; then
+            step "plymouthd ignored the quit — killing it directly"
+            pkill -x plymouthd 2>/dev/null || true
+            sleep 1
+            pgrep -x plymouthd >/dev/null && pkill -9 -x plymouthd 2>/dev/null
+        fi
         timeout 10 systemctl stop plymouth-quit-wait.service 2>/dev/null || true
+        ok "plymouth dealt with"
+        echo "     hint: if this recurs every boot, mask the waiter: systemctl mask plymouth-quit-wait.service"
     fi
     step "Cancelling the remaining stuck jobs — boot finished ages ago, these are zombies blocking the queue"
     systemctl cancel 2>&1 | sed 's/^/     /'
@@ -140,8 +150,8 @@ if ! systemctl is-active -q power-profiles-daemon; then
 fi
 
 step "Verifying the daemon answers on D-Bus"
-if powerprofilesctl get >/dev/null 2>&1; then
-    ok "D-Bus answers — active profile: $(powerprofilesctl get 2>/dev/null)"
+if timeout 10 powerprofilesctl get >/dev/null 2>&1; then
+    ok "D-Bus answers — active profile: $(timeout 10 powerprofilesctl get 2>/dev/null)"
 else
     warn "service runs but D-Bus is not answering yet — give it a few seconds"
 fi
