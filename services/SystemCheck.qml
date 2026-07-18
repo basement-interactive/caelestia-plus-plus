@@ -89,47 +89,9 @@ Singleton {
             return;
         scanning = true;
         ShellUpdates.check();
-        const bins = binaries.map(b => b.bin).join(" ");
-        // One shell probe, one machine-readable line per check. Values never
-        // contain "|" (tr'd away). Kept ${}-free: this is a JS template.
-        probe.command = ["sh", "-c", `
-for b in ${bins}; do command -v "$b" >/dev/null 2>&1 && echo "bin|$b|ok" || echo "bin|$b|missing"; done
-systemctl is-active -q power-profiles-daemon 2>/dev/null && echo "ppd|active" || echo "ppd|inactive"
-echo "pmconflict|$(pacman -Qq tlp auto-cpufreq laptop-mode-tools tuned tuned-ppd 2>/dev/null | tr '\\n' ' ')"
-echo "ppdunit|$(systemctl is-enabled power-profiles-daemon 2>&1 | head -1 | cut -c1-40 | tr '|' '/')|$(systemctl is-active power-profiles-daemon 2>&1 | head -1 | cut -c1-20)"
-[ -f "$HOME/.face" ] && echo "face|ok" || echo "face|missing"
-grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ignpkg|missing"
-for f in max-perf anti-heat dynamic bed-mode; do
-  repo=$(grep -m1 '^root_half_version=' "${Quickshell.shellDir}/system/$f/install.sh" 2>/dev/null | cut -d= -f2)
-  [ -n "$repo" ] || repo=0
-  inst=$(cat "/etc/caelestia/$f.version" 2>/dev/null || echo 0)
-  if systemctl is-enabled -q "$f-sync.path" 2>/dev/null; then en=1; else en=0; fi
-  echo "ver|$f|$repo|$inst|$en"
-done
-hc=$(hyprctl configerrors 2>/dev/null | grep -vi 'no errors' | grep .) || true
-echo "hyprerr|$(printf '%s' "$hc" | grep -c .)|$(printf '%s' "$hc" | head -1 | cut -c1-140 | tr '|' '/')"
-for p in xdg-desktop-portal-hyprland qt6-wayland; do pacman -Q "$p" >/dev/null 2>&1 && echo "pkg|$p|ok" || echo "pkg|$p|missing"; done
-echo "portals|$(pacman -Qq 2>/dev/null | grep '^xdg-desktop-portal-' | grep -v hyprland | grep -v gtk | tr '\\n' ' ')"
-pgrep -f 'polkit-gnome-auth|polkit-kde-auth|lxpolkit|hyprpolkitagent|mate-polkit|xfce-polkit' >/dev/null && echo "polkitagent|ok" || echo "polkitagent|missing"
-for c in "$HOME/.config/caelestia/"*.json; do
-  [ -e "$c" ] || continue
-  python3 -m json.tool "$c" >/dev/null 2>&1 && echo "cfgjson|$c|ok" || echo "cfgjson|$c|bad"
-done
-echo "gitdirty|$(git -C '${Quickshell.shellDir}' status --porcelain 2>/dev/null | grep -c .)"
-echo "failed|$(systemctl --failed --no-legend --plain 2>/dev/null | grep -c .)|$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | tr '\\n' ' ')"
-echo "userfailed|$(systemctl --user --failed --no-legend --plain 2>/dev/null | grep -c .)|$(systemctl --user --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | tr '\\n' ' ')"
-echo "journal|$(journalctl -b -p err -q --no-pager 2>/dev/null | grep -c .)"
-if [ -e /var/lib/pacman/db.lck ] && ! pgrep -x pacman >/dev/null; then echo "paclock|stale"; else echo "paclock|ok"; fi
-echo "orphans|$(pacman -Qtdq 2>/dev/null | grep -c .)|$(pacman -Qtdq 2>/dev/null | head -10 | tr '\\n' ' ')"
-echo "paccache|$(du -sBG /var/cache/pacman/pkg 2>/dev/null | cut -f1 | tr -d G)|$(command -v paccache >/dev/null && echo 1 || echo 0)"
-echo "disk|$(df --output=pcent / 2>/dev/null | tail -1 | tr -d ' %')"
-if command -v pactl >/dev/null; then echo "dupsinks|$(pactl list short sinks 2>/dev/null | awk '{print $2}' | sort | uniq -d | tr '\\n' ' ')"; else echo "dupsinks|"; fi
-systemctl --user is-active -q pipewire 2>/dev/null && echo "pipewire|active" || echo "pipewire|inactive"
-if locale 2>&1 >/dev/null | grep -q .; then echo "locale|bad"; else echo "locale|ok"; fi
-echo "ntp|$(timedatectl show -p NTP --value 2>/dev/null)"
-cor=$(pacman -Qk 2>/dev/null | awk -F': ' '$2 !~ /, 0 missing/ {sub(/:$/, "", $1); print $1}') || true
-echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 | tr '\\n' ' ')"
-`];
+        // All probing lives in one shell script (assets/systemcheck-probe.sh)
+        // that prints machine-readable "key|field|field" lines
+        probe.command = ["bash", Quickshell.shellPath("assets/systemcheck-probe.sh"), Quickshell.shellDir, Paths.wallsdir, binaries.map(b => b.bin).join(" ")];
         probe.running = true;
     }
 
@@ -358,7 +320,7 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
 
         const orphans = parseInt(flags.orphans?.[0] ?? "0", 10);
         push("orphans", orphans > 0 ? qsTr("%1 orphaned packages").arg(orphans) : qsTr("No orphaned packages"), orphans > 0 ? qsTr("Installed as dependencies, no longer needed by anything: %1%2").arg(flags.orphans?.[1] ?? "").arg(orphans > 10 ? "…" : "") : qsTr("pacman -Qtdq is empty"), orphans > 0 ? "info" : "ok", orphans > 0 ? {
-            fix: Object.assign({label: qsTr("Remove")}, _rootFix(qsTr("Removes all orphaned packages and their now-unneeded dependencies (pacman -Rns). Review the list first — anything you want to keep should be reinstalled explicitly or marked with `pacman -D --asexplicit`."), ["pacman -Rns --noconfirm $(pacman -Qtdq)"]))
+            fix: Object.assign({label: qsTr("Remove")}, _rootFix(qsTr("First marks everything the shell itself needs as explicitly installed (so it can never be swept), then removes the remaining orphans and their unneeded dependencies (pacman -Rns)."), [`pacman -D --asexplicit wl-clipboard networkmanager python libnotify power-profiles-daemon ddcutil brightnessctl gpu-screen-recorder swappy libxml2 qt6-wayland xdg-desktop-portal-hyprland hyprpolkitagent pacman-contrib >/dev/null 2>&1 || true`, "o=$(pacman -Qtdq); [ -n \"$o\" ] && pacman -Rns --noconfirm $o || echo 'nothing left to remove'"]))
         } : null);
 
         const cacheGB = parseInt(flags.paccache?.[0] ?? "0", 10);
@@ -396,6 +358,116 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
         push("face", flags.face?.[0] === "ok" ? qsTr("Avatar set") : qsTr("No avatar (~/.face)"), flags.face?.[0] === "ok" ? qsTr("Dashboard user card has a picture") : qsTr("Cosmetic: click the avatar in the dashboard to set one"), flags.face?.[0] === "ok" ? "ok" : "info");
 
         push("log-errors", DebugConsole.errorCount > 0 ? qsTr("%1 errors in the shell log").arg(DebugConsole.errorCount) : qsTr("No errors in the shell log"), DebugConsole.errorCount > 0 ? qsTr("See the console tab; copy diagnostics collects the distinct ones") : qsTr("This session so far"), DebugConsole.errorCount > 0 ? "warn" : "ok");
+
+        // -- Caelestia extras
+        push("caelestia-cli", flags.cli?.[0] === "broken" ? qsTr("caelestia CLI broken") : qsTr("caelestia CLI works"), flags.cli?.[0] === "broken" ? qsTr("`caelestia --version` fails — schemes, wallpapers and recording die with it; reinstall the caelestia++-cli package") : qsTr("Scheme, wallpaper and recorder plumbing available"), flags.cli?.[0] === "broken" ? "fail" : "ok");
+
+        if (flags.walldir?.[0] === "missing")
+            push("wallpaper-dir", qsTr("Wallpaper directory missing"), qsTr("%1 does not exist — the wallpaper picker has nothing to show").arg(flags.walldir?.[1] ?? ""), "info", {
+                fix: Object.assign({label: qsTr("Create")}, _userFix(qsTr("Creates the empty wallpaper directory the config points at. Nothing else changes."), [`mkdir -p '${flags.walldir?.[1] ?? ""}'`]))
+            });
+
+        const knownBarIds = ["logo", "workspaces", "spacer", "activeWindow", "firewall", "features", "tray", "clock", "statusIcons", "power"];
+        const unknownBarIds = (flags.barids?.[0] ?? "").split(" ").filter(i => i && !knownBarIds.includes(i));
+        if (unknownBarIds.length)
+            push("bar-ids", qsTr("Unknown bar entries in shell.json"), qsTr("\"%1\" is not a valid bar entry id (typo?) — the bar silently drops it. Valid ids: %2").arg(unknownBarIds.join("\", \"")).arg(knownBarIds.join(", ")), "warn");
+
+        // -- Hyprland extras
+        const portalUp = flags.portalsvc?.[0] === "active";
+        push("portal-service", portalUp ? qsTr("Desktop portal service running") : qsTr("Desktop portal service not running"), portalUp ? qsTr("Screen sharing and file pickers are wired up") : qsTr("Flatpaks, screen sharing and file pickers break without it"), portalUp ? "ok" : "warn", portalUp ? null : {
+            fix: Object.assign({label: qsTr("Start")}, _userFix(qsTr("Enables and starts your user's xdg-desktop-portal service and restarts the Hyprland portal behind it."), ["systemctl --user enable --now xdg-desktop-portal", "systemctl --user restart xdg-desktop-portal-hyprland"]))
+        });
+
+        const lowRefresh = parseInt(flags.refresh?.[0] ?? "0", 10);
+        if (lowRefresh > 0)
+            push("monitor-refresh", qsTr("%1 monitors run below their best refresh rate").arg(lowRefresh), qsTr("%1 — set the higher rate in your Hyprland monitor config (monitor = name, resolution@rate, …); free smoothness").arg(flags.refresh?.[1] ?? ""), "info");
+
+        // -- Desktop entries and paths
+        const brokenDesk = parseInt(flags.desktopbroken?.[0] ?? "0", 10);
+        const brokenDeskUser = parseInt(flags.desktopbroken?.[1] ?? "0", 10);
+        if (brokenDesk > 0) {
+            const userFiles = (flags.desktopbrokenuser?.[0] ?? "").trim().split(" ").filter(f => f);
+            push("desktop-broken", qsTr("%1 launcher entries point at missing programs").arg(brokenDesk), qsTr("%1— leftovers from removed apps; they clutter the launcher and fail on click. %2 are user-level%3").arg(flags.desktopbroken?.[2] ?? "").arg(brokenDeskUser).arg(brokenDeskUser > 0 ? qsTr(" (fixable here); the rest belong to packages") : qsTr("; all belong to packages — reinstall or remove those packages")), "info", brokenDeskUser > 0 ? {
+                fix: Object.assign({label: qsTr("Shelve")}, _userFix(qsTr("Moves the broken user-level .desktop files into ~/.local/share/applications/broken-backup/ — nothing is deleted, and package-owned entries are not touched."), ["mkdir -p \"$HOME/.local/share/applications/broken-backup\""].concat(userFiles.map(f => `mv '${f}' \"$HOME/.local/share/applications/broken-backup/\"`))))
+            } : null);
+        } else {
+            push("desktop-broken", qsTr("All launcher entries resolve"), qsTr("Every .desktop Exec points at an existing program"), "ok");
+        }
+
+        const malformed = parseInt(flags.desktopmalformed?.[0] ?? "0", 10);
+        if (malformed > 0) {
+            const userFiles = (flags.desktopmalformeduser?.[0] ?? "").trim().split(" ").filter(f => f);
+            push("desktop-malformed", qsTr("%1 malformed .desktop files").arg(malformed), qsTr("%1— invalid lines make every desktop-entry parser log warnings (the shell included)%2").arg(flags.desktopmalformed?.[1] ?? "").arg(userFiles.length ? "" : qsTr("; all package-owned, harmless but noisy")), "info", userFiles.length ? {
+                fix: Object.assign({label: qsTr("Shelve")}, _userFix(qsTr("Moves the malformed user-level .desktop files into ~/.local/share/applications/broken-backup/ — nothing is deleted."), ["mkdir -p \"$HOME/.local/share/applications/broken-backup\""].concat(userFiles.map(f => `mv '${f}' \"$HOME/.local/share/applications/broken-backup/\"`))))
+            } : null);
+        }
+
+        const missingPathDirs = parseInt(flags.pathdirs?.[0] ?? "0", 10);
+        if (missingPathDirs > 0)
+            push("path-dirs", qsTr("%1 $PATH entries do not exist").arg(missingPathDirs), qsTr("%1 — every command lookup walks these dead directories; remove them from your shell profile").arg(flags.pathdirs?.[1] ?? ""), "info");
+
+        const dangUser = (flags.danglinguser?.[1] ?? "").trim().split(" ").filter(f => f);
+        const dangRoot = (flags.danglingroot?.[1] ?? "").trim().split(" ").filter(f => f);
+        if (dangUser.length + dangRoot.length > 0) {
+            const commands = [];
+            if (dangUser.length)
+                commands.push(`rm ${dangUser.map(f => `'${f}'`).join(" ")}`);
+            if (dangRoot.length)
+                commands.push(`pkexec rm ${dangRoot.map(f => `'${f}'`).join(" ")}`);
+            push("dangling-links", qsTr("%1 dangling symlinks in bin directories").arg(dangUser.length + dangRoot.length), qsTr("%1 %2— they point at nothing and shadow command lookups").arg(dangUser.join(" ")).arg(dangRoot.join(" ")), "info", {
+                fix: Object.assign({label: qsTr("Remove")}, _userFix(qsTr("Deletes exactly the dangling symlinks listed (targets are already gone; the links do nothing). System-level ones go through pkexec."), commands))
+            });
+        }
+
+        // -- Distro and packages
+        const onCachy = flags.osid?.[0] === "cachyos";
+        const foreignCount = parseInt(flags.foreignrepo?.[0] ?? "0", 10);
+        if (foreignCount > 0) {
+            const switchCmd = `pacman -S --noconfirm $(pacman -Qmq | grep -v '^caelestia++' | grep -v -- '-debug$' | while read -r p; do pacman -Si "$p" >/dev/null 2>&1 && printf '%s ' "$p"; done)`;
+            push("foreign-repo", onCachy ? qsTr("%1 AUR packages have CachyOS repo builds").arg(foreignCount) : qsTr("%1 foreign packages have repo builds").arg(foreignCount), qsTr("%1— the repo versions update with the system%2").arg(flags.foreignrepo?.[1] ?? "").arg(onCachy ? qsTr(" and CachyOS ships them compiler-optimized (v3/znver) — free speedup over the local AUR builds") : ""), "info", {
+                fix: Object.assign({label: qsTr("Switch")}, _rootFix(qsTr("Replaces each locally-built AUR package with the repo build of the same name (pacman -S). Versions may differ slightly; the packages themselves stay installed. caelestia++ and -debug packages are excluded."), [switchCmd]))
+            });
+        }
+
+        if (onCachy && !(flags.kernel?.[0] ?? "").includes("cachyos"))
+            push("cachy-kernel", qsTr("Not running a CachyOS kernel"), qsTr("Running %1 — the linux-cachyos kernel carries the scheduler and compiler tuning this distro is about. Install it and reboot into it (boot entries update automatically)").arg(flags.kernel?.[0] ?? "?"), "info");
+
+        if (onCachy && parseInt(flags.cachyrepos?.[0] ?? "0", 10) === 0)
+            push("cachy-repos", qsTr("CachyOS repositories missing from pacman.conf"), qsTr("All packages come from plain Arch repos — no optimized builds at all. Re-add them with the cachyos-repo script from the CachyOS wiki"), "warn");
+
+        if (flags.dbage?.[0] === "stale")
+            push("pacman-db", qsTr("Package databases older than two weeks"), qsTr("Sync databases have not been refreshed in 14+ days — installs pull outdated versions and fixes here may target stale packages"), "info", {
+                fix: Object.assign({label: qsTr("Update system")}, _rootFix(qsTr("Runs a FULL system upgrade (pacman -Syu). This updates every package, can take a while, and is the only safe way to refresh the databases (a plain -Sy risks partial upgrades). Review the system afterwards."), ["pacman -Syu --noconfirm"]))
+            });
+
+        const pacnewCount = parseInt(flags.pacnew?.[0] ?? "0", 10);
+        if (pacnewCount > 0)
+            push("pacnew", qsTr("%1 unmerged .pacnew/.pacsave files").arg(pacnewCount), qsTr("%1— package updates shipped new default configs you have not merged; run `pacdiff` (pacman-contrib) in a terminal to review them. Merging is judgment work, so no automatic fix").arg(flags.pacnew?.[1] ?? ""), "warn");
+
+        // -- System health extras
+        const dumps = parseInt(flags.coredumps?.[0] ?? "0", 10);
+        if (dumps > 0)
+            push("coredumps", qsTr("%1 application crashes in the last 24h").arg(dumps), qsTr("Something is segfaulting — `coredumpctl list --since -24h` names it"), "info");
+
+        if (parseInt(flags.swap?.[0] ?? "1", 10) === 0)
+            push("swap", qsTr("No swap or zram configured"), qsTr("Under memory pressure the kernel OOM-kills apps instead of paging — install zram-generator for compressed in-RAM swap (the CachyOS default)"), "warn");
+
+        const fstrimOn = flags.fstrim?.[0] === "1";
+        const isSsd = flags.fstrim?.[1] === "1";
+        if (isSsd && !fstrimOn)
+            push("fstrim", qsTr("SSD TRIM timer disabled"), qsTr("Without weekly TRIM the SSD slows down as it fills and wears faster"), "warn", {
+                fix: Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Enables systemd's weekly fstrim.timer. It trims mounted filesystems once a week; no data is touched."), ["systemctl enable --now fstrim.timer"]))
+            });
+
+        if (flags.rtkit?.[0] === "inactive")
+            push("rtkit", qsTr("rtkit daemon not running"), qsTr("PipeWire cannot get realtime priority without it — audio crackles under load"), "info", {
+                fix: Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Enables and starts rtkit-daemon, which grants PipeWire realtime scheduling priority."), ["systemctl enable --now rtkit-daemon"]))
+            });
+
+        if (SysInfo.isLaptop && flags.governor?.[0] === "performance" && !MaxPerf.enabled)
+            push("governor", qsTr("CPU governor pinned to performance"), qsTr("Max-perf is off but the governor is still \"performance\" — clocks stay high and the battery drains for nothing"), "info", {
+                fix: Object.assign({label: qsTr("Rebalance")}, _userFix(qsTr("Sets the power profile back to balanced via powerprofilesctl, which restores the normal governor."), ["powerprofilesctl set balanced"]))
+            });
 
         // Problems first, then untouchable info rows, healthy last
         const rank = {fail: 0, warn: 1, info: 2, ok: 3};
