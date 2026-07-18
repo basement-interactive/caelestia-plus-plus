@@ -76,7 +76,8 @@ Singleton {
         probe.command = ["sh", "-c", `
 for b in ${bins}; do command -v "$b" >/dev/null 2>&1 && echo "bin|$b|ok" || echo "bin|$b|missing"; done
 systemctl is-active -q power-profiles-daemon 2>/dev/null && echo "ppd|active" || echo "ppd|inactive"
-echo "pmconflict|$(pacman -Qq tlp auto-cpufreq laptop-mode-tools 2>/dev/null | tr '\\n' ' ')"
+echo "pmconflict|$(pacman -Qq tlp auto-cpufreq laptop-mode-tools tuned tuned-ppd 2>/dev/null | tr '\\n' ' ')"
+echo "ppdunit|$(systemctl is-enabled power-profiles-daemon 2>&1 | head -1 | cut -c1-40 | tr '|' '/')|$(systemctl is-active power-profiles-daemon 2>&1 | head -1 | cut -c1-20)"
 [ -f "$HOME/.face" ] && echo "face|ok" || echo "face|missing"
 grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ignpkg|missing"
 for f in max-perf anti-heat dynamic bed-mode; do
@@ -239,8 +240,13 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
         const pmConflicts = (flags.pmconflict?.[0] ?? "").trim();
         if (flags["bin.powerprofilesctl"] === "ok") {
             const active = flags.ppd?.[0] === "active";
-            push("ppd-service", active ? qsTr("power-profiles-daemon running") : qsTr("power-profiles-daemon not running"), active ? qsTr("The daemon behind power profile switching") : pmConflicts ? qsTr("Likely blocked by %1 (see the conflict finding below)").arg(pmConflicts) : qsTr("The daemon behind power profile switching"), active ? "ok" : "warn", active ? null : {
-                fix: Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Unmasks (in case another power tool masked it), enables and starts the power-profiles-daemon system service."), ["systemctl unmask power-profiles-daemon", "systemctl enable --now power-profiles-daemon"]))
+            const unitEnabled = flags.ppdunit?.[0] ?? "";
+            const unitMissing = /not-found|No such file|could not be found/i.test(unitEnabled);
+            const unitMasked = unitEnabled.includes("masked");
+            const state = qsTr("unit state: %1 / %2").arg(unitEnabled || "?").arg(flags.ppdunit?.[1] ?? "?");
+            const cause = unitMissing ? qsTr("service unit not found — the powerprofilesctl tool is present but the daemon package half is not; dbus activation times out with NoReply") : unitMasked ? qsTr("unit is masked, usually by another power tool — dbus activation times out with NoReply") : pmConflicts ? qsTr("likely blocked by %1 (see the conflict finding)").arg(pmConflicts) : qsTr("the daemon behind power profile switching is not active");
+            push("ppd-service", active ? qsTr("power-profiles-daemon running") : qsTr("power-profiles-daemon not running"), active ? qsTr("The daemon behind power profile switching") : `${cause} — ${state}`, active ? "ok" : "warn", active ? null : {
+                fix: unitMissing ? Object.assign({label: qsTr("Install"), pkg: "power-profiles-daemon"}, _rootFix(qsTr("Reinstalls the power-profiles-daemon package (restores its missing service unit), then enables and starts it. Reload the shell afterwards so it reconnects to the daemon."), ["pacman -S --noconfirm power-profiles-daemon", "systemctl enable --now power-profiles-daemon"])) : Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Unmasks (in case another power tool masked it), enables and starts the power-profiles-daemon system service. Reload the shell afterwards so it reconnects to the daemon."), ["systemctl unmask power-profiles-daemon", "systemctl enable --now power-profiles-daemon"]))
             });
         }
 
