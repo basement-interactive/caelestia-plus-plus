@@ -112,7 +112,7 @@ Singleton {
         pendingFix = Object.assign({
             id: "all",
             title: qsTr("Install %1 missing packages").arg(missingPackages.length)
-        }, _rootFix(qsTr("Installs the packages the shell needs through pacman, as root via pkexec. Nothing is removed or reconfigured."), [cmd]));
+        }, _pacmanFix(qsTr("Installs the packages the shell needs through pacman, as root via pkexec. Nothing is removed or reconfigured."), [cmd]));
     }
 
     // Startup-prompt bundle: missing packages + outdated privileged halves,
@@ -130,7 +130,7 @@ Singleton {
         pendingFix = Object.assign({
             id: "all",
             title: qsTr("Fix everything found")
-        }, _rootFix(qsTr("Installs missing packages and re-runs the installers of outdated privileged components (they overwrite their own files under /usr/local/bin and /etc/systemd/system, then restart their units). One password, everything runs as root via pkexec."), commands));
+        }, _pacmanFix(qsTr("Installs missing packages and re-runs the installers of outdated privileged components (they overwrite their own files under /usr/local/bin and /etc/systemd/system, then restart their units). One password, everything runs as root via pkexec."), commands));
     }
 
     function confirmPendingFix(): void {
@@ -190,6 +190,14 @@ Singleton {
         return {summary: summary, commands: commands, exec: ["sh", "-c", commands.join(" && ")]};
     }
 
+    // Every pacman-touching fix self-heals the classic failure mode first:
+    // a stale db.lck left by a crashed pacman (checked for a live process)
+    readonly property string _pacmanGuard: "{ [ -e /var/lib/pacman/db.lck ] && ! pgrep -x pacman >/dev/null && rm -f /var/lib/pacman/db.lck; true; }"
+
+    function _pacmanFix(summary: string, commands: var): var {
+        return _rootFix(summary, [_pacmanGuard].concat(commands));
+    }
+
     function _finish(out: string): void {
         const flags = {};
         const vers = {};
@@ -217,7 +225,7 @@ Singleton {
             const ok = flags[`bin.${b.bin}`] === "ok";
             push(`bin-${b.bin}`, ok ? qsTr("%1 installed").arg(b.pkg) : qsTr("%1 missing").arg(b.pkg), b.why, ok ? "ok" : b.severity, ok ? null : {
                 prompt: true,
-                fix: Object.assign({label: qsTr("Install"), pkg: b.pkg}, _rootFix(qsTr("Installs the %1 package with pacman. Nothing is removed.").arg(b.pkg), [`pacman -S --needed --noconfirm ${b.pkg}`]))
+                fix: Object.assign({label: qsTr("Install"), pkg: b.pkg}, _pacmanFix(qsTr("Installs the %1 package with pacman. Nothing is removed.").arg(b.pkg), [`pacman -S --needed --noconfirm ${b.pkg}`]))
             });
         }
 
@@ -268,7 +276,7 @@ Singleton {
         push("git-dirty", dirty > 0 ? qsTr("Shell checkout has %1 modified files").arg(dirty) : qsTr("Shell checkout clean"), dirty > 0 ? qsTr("Local edits are fine, but they can conflict with updates — no automatic action") : qsTr("No local modifications"), dirty > 0 ? "info" : "ok");
 
         push("ignorepkg", flags.ignpkg?.[0] === "ok" ? qsTr("Pacman IgnorePkg set") : qsTr("Pacman IgnorePkg not set"), flags.ignpkg?.[0] === "ok" ? qsTr("Repo packages won't clobber the git checkout") : qsTr("A caelestia++ repo package could overwrite this checkout on -Syu"), flags.ignpkg?.[0] === "ok" ? "ok" : "warn", flags.ignpkg?.[0] === "ok" ? null : {
-            fix: Object.assign({label: qsTr("Fix")}, _rootFix(qsTr("Appends one IgnorePkg line to /etc/pacman.conf so system updates skip the caelestia++ packages. No other line is touched."), ["printf 'IgnorePkg = caelestia++-shell caelestia++-cli\\n' >> /etc/pacman.conf"]))
+            fix: Object.assign({label: qsTr("Fix")}, _rootFix(qsTr("Appends one IgnorePkg line to /etc/pacman.conf so system updates skip the caelestia++ packages. No other line is touched."), ["grep -q 'IgnorePkg.*caelestia' /etc/pacman.conf || printf 'IgnorePkg = caelestia++-shell caelestia++-cli\\n' >> /etc/pacman.conf"]))
         });
 
         // -- Hyprland
@@ -279,7 +287,7 @@ Singleton {
             const ok = flags[`pkg.${p}`] === "ok";
             push(`pkg-${p}`, ok ? qsTr("%1 installed").arg(p) : qsTr("%1 missing").arg(p), p === "qt6-wayland" ? qsTr("Qt apps need it to run natively on Wayland") : qsTr("Screen sharing and file pickers break without the Hyprland portal"), ok ? "ok" : "fail", ok ? null : {
                 prompt: true,
-                fix: Object.assign({label: qsTr("Install"), pkg: p}, _rootFix(qsTr("Installs the %1 package with pacman. Nothing is removed.").arg(p), [`pacman -S --needed --noconfirm ${p}`]))
+                fix: Object.assign({label: qsTr("Install"), pkg: p}, _pacmanFix(qsTr("Installs the %1 package with pacman. Nothing is removed.").arg(p), [`pacman -S --needed --noconfirm ${p}`]))
             });
         }
 
@@ -288,7 +296,7 @@ Singleton {
 
         const agentOk = flags.polkitagent?.[0] === "ok";
         push("polkit-agent", agentOk ? qsTr("Polkit agent running") : qsTr("No polkit authentication agent running"), agentOk ? qsTr("Password prompts for privileged actions work") : qsTr("Without one, no password dialog can appear — including these quick fixes. Install one and add it to Hyprland's exec-once."), agentOk ? "ok" : "fail", agentOk ? null : {
-            fix: Object.assign({label: qsTr("Install")}, _rootFix(qsTr("Installs the hyprpolkitagent package. You still need to add `exec-once = systemctl --user start hyprpolkitagent` to your Hyprland config — that part is not automated."), ["pacman -S --needed --noconfirm hyprpolkitagent"]))
+            fix: Object.assign({label: qsTr("Install")}, _pacmanFix(qsTr("Installs the hyprpolkitagent package. You still need to add `exec-once = systemctl --user start hyprpolkitagent` to your Hyprland config — that part is not automated."), ["pacman -S --needed --noconfirm hyprpolkitagent"]))
         });
 
         // -- System health
@@ -315,19 +323,19 @@ Singleton {
 
         const corrupt = parseInt(flags.corrupt?.[0] ?? "0", 10);
         push("corrupt-pkgs", corrupt > 0 ? qsTr("%1 packages have missing files").arg(corrupt) : qsTr("All package files present"), corrupt > 0 ? qsTr("%1 — files these packages installed are gone from disk (deleted or corrupted); reinstalling restores them").arg(flags.corrupt?.[1] ?? "") : qsTr("pacman -Qk finds nothing missing"), corrupt > 0 ? "warn" : "ok", corrupt > 0 ? {
-            fix: Object.assign({label: qsTr("Reinstall")}, _rootFix(qsTr("Reinstalls the affected packages with pacman, restoring their missing files. Configs in /etc marked as backup files are preserved by pacman."), ["pacman -S --noconfirm $(pacman -Qk 2>/dev/null | awk -F': ' '$2 !~ /, 0 missing/ {sub(/:$/, \"\", $1); print $1}')"]))
+            fix: Object.assign({label: qsTr("Reinstall")}, _pacmanFix(qsTr("Reinstalls the affected packages with pacman, restoring their missing files. Configs in /etc marked as backup files are preserved by pacman."), ["pacman -S --noconfirm $(pacman -Qk 2>/dev/null | awk -F': ' '$2 !~ /, 0 missing/ {sub(/:$/, \"\", $1); print $1}')"]))
         } : null);
 
         const orphans = parseInt(flags.orphans?.[0] ?? "0", 10);
         push("orphans", orphans > 0 ? qsTr("%1 orphaned packages").arg(orphans) : qsTr("No orphaned packages"), orphans > 0 ? qsTr("Installed as dependencies, no longer needed by anything: %1%2").arg(flags.orphans?.[1] ?? "").arg(orphans > 10 ? "…" : "") : qsTr("pacman -Qtdq is empty"), orphans > 0 ? "info" : "ok", orphans > 0 ? {
-            fix: Object.assign({label: qsTr("Remove")}, _rootFix(qsTr("First marks everything the shell itself needs as explicitly installed (so it can never be swept), then removes the remaining orphans and their unneeded dependencies (pacman -Rns)."), [`pacman -D --asexplicit wl-clipboard networkmanager python libnotify power-profiles-daemon ddcutil brightnessctl gpu-screen-recorder swappy libxml2 qt6-wayland xdg-desktop-portal-hyprland hyprpolkitagent pacman-contrib >/dev/null 2>&1 || true`, "o=$(pacman -Qtdq); [ -n \"$o\" ] && pacman -Rns --noconfirm $o || echo 'nothing left to remove'"]))
+            fix: Object.assign({label: qsTr("Remove")}, _pacmanFix(qsTr("First marks everything the shell itself needs as explicitly installed (so it can never be swept), then removes the remaining orphans and their unneeded dependencies (pacman -Rns)."), [`pacman -D --asexplicit wl-clipboard networkmanager python libnotify power-profiles-daemon ddcutil brightnessctl gpu-screen-recorder swappy libxml2 qt6-wayland xdg-desktop-portal-hyprland hyprpolkitagent pacman-contrib >/dev/null 2>&1 || true`, "o=$(pacman -Qtdq); [ -n \"$o\" ] && pacman -Rns --noconfirm $o || echo 'nothing left to remove'"]))
         } : null);
 
         const cacheGB = parseInt(flags.paccache?.[0] ?? "0", 10);
         const hasPaccache = flags.paccache?.[1] === "1";
         if (cacheGB >= 8)
             push("pac-cache", qsTr("Package cache is %1 GiB").arg(cacheGB), hasPaccache ? qsTr("Old package versions pile up in /var/cache/pacman/pkg") : qsTr("Old package versions pile up in /var/cache/pacman/pkg — install pacman-contrib for the paccache cleaner"), "info", hasPaccache ? {
-                fix: Object.assign({label: qsTr("Clean")}, _rootFix(qsTr("Runs paccache -rk2: deletes cached package files except the two most recent versions of each package. Installed software is not affected."), ["paccache -rk2"]))
+                fix: Object.assign({label: qsTr("Clean")}, _pacmanFix(qsTr("Installs pacman-contrib first if the paccache tool is missing, then deletes cached package files except the two most recent versions of each package. Installed software is not affected."), ["command -v paccache >/dev/null || pacman -S --needed --noconfirm pacman-contrib", "paccache -rk2"]))
             } : null);
 
         const diskPct = parseInt(flags.disk?.[0] ?? "0", 10);
@@ -336,12 +344,12 @@ Singleton {
         // -- Audio
         const pipewireOk = flags.pipewire?.[0] === "active";
         push("pipewire", pipewireOk ? qsTr("PipeWire running") : qsTr("PipeWire not running"), pipewireOk ? qsTr("Audio stack is up") : qsTr("No audio and no visualiser without it"), pipewireOk ? "ok" : "fail", pipewireOk ? null : {
-            fix: Object.assign({label: qsTr("Start")}, _userFix(qsTr("Enables and starts your user's pipewire, pipewire-pulse and wireplumber services. No configuration is changed."), ["systemctl --user enable --now pipewire pipewire-pulse wireplumber"]))
+            fix: Object.assign({label: qsTr("Start")}, _userFix(qsTr("Staged: checks each audio unit exists, unmasks if needed, then enables and starts pipewire, pipewire-pulse and wireplumber. Streams its progress here."), [`bash '${Quickshell.shellDir}/system/repair/service.sh' --user pipewire.service pipewire-pulse.service wireplumber.service`]))
         });
 
         const dupSinks = (flags.dupsinks?.[0] ?? "").trim();
         push("dup-sinks", dupSinks ? qsTr("Duplicate audio sinks") : qsTr("No duplicate audio sinks"), dupSinks ? qsTr("%1 — the same device shows up twice (usually a stale ALSA/PipeWire profile); restarting the audio stack rebuilds the device list").arg(dupSinks) : qsTr("Each output device appears once"), dupSinks ? "warn" : "ok", dupSinks ? {
-            fix: Object.assign({label: qsTr("Restart audio")}, _userFix(qsTr("Restarts your user's pipewire, pipewire-pulse and wireplumber services. Audio cuts out for a second or two; apps reconnect automatically."), ["systemctl --user restart pipewire pipewire-pulse wireplumber"]))
+            fix: Object.assign({label: qsTr("Restart audio")}, _userFix(qsTr("Restarts pipewire, pipewire-pulse and wireplumber (staged, with per-unit verification). Audio cuts out for a second or two; apps reconnect automatically."), [`bash '${Quickshell.shellDir}/system/repair/service.sh' --user --restart pipewire.service pipewire-pulse.service wireplumber.service`]))
         } : null);
 
         // -- Misc environment
@@ -375,7 +383,7 @@ Singleton {
         // -- Hyprland extras
         const portalUp = flags.portalsvc?.[0] === "active";
         push("portal-service", portalUp ? qsTr("Desktop portal service running") : qsTr("Desktop portal service not running"), portalUp ? qsTr("Screen sharing and file pickers are wired up") : qsTr("Flatpaks, screen sharing and file pickers break without it"), portalUp ? "ok" : "warn", portalUp ? null : {
-            fix: Object.assign({label: qsTr("Start")}, _userFix(qsTr("Enables and starts your user's xdg-desktop-portal service and restarts the Hyprland portal behind it."), ["systemctl --user enable --now xdg-desktop-portal", "systemctl --user restart xdg-desktop-portal-hyprland"]))
+            fix: Object.assign({label: qsTr("Start")}, _userFix(qsTr("Staged: brings up your user's xdg-desktop-portal (static units are started directly), then restarts the Hyprland portal behind it. Streams its progress here."), [`bash '${Quickshell.shellDir}/system/repair/service.sh' --user xdg-desktop-portal.service`, `bash '${Quickshell.shellDir}/system/repair/service.sh' --user --restart xdg-desktop-portal-hyprland.service`]))
         });
 
         const lowRefresh = parseInt(flags.refresh?.[0] ?? "0", 10);
@@ -425,7 +433,7 @@ Singleton {
         if (foreignCount > 0) {
             const switchCmd = `pacman -S --noconfirm $(pacman -Qmq | grep -v '^caelestia++' | grep -v -- '-debug$' | while read -r p; do pacman -Si "$p" >/dev/null 2>&1 && printf '%s ' "$p"; done)`;
             push("foreign-repo", onCachy ? qsTr("%1 AUR packages have CachyOS repo builds").arg(foreignCount) : qsTr("%1 foreign packages have repo builds").arg(foreignCount), qsTr("%1— the repo versions update with the system%2").arg(flags.foreignrepo?.[1] ?? "").arg(onCachy ? qsTr(" and CachyOS ships them compiler-optimized (v3/znver) — free speedup over the local AUR builds") : ""), "info", {
-                fix: Object.assign({label: qsTr("Switch")}, _rootFix(qsTr("Replaces each locally-built AUR package with the repo build of the same name (pacman -S). Versions may differ slightly; the packages themselves stay installed. caelestia++ and -debug packages are excluded."), [switchCmd]))
+                fix: Object.assign({label: qsTr("Switch")}, _pacmanFix(qsTr("Replaces each locally-built AUR package with the repo build of the same name (pacman -S). Versions may differ slightly; the packages themselves stay installed. caelestia++ and -debug packages are excluded."), [switchCmd]))
             });
         }
 
@@ -437,7 +445,7 @@ Singleton {
 
         if (flags.dbage?.[0] === "stale")
             push("pacman-db", qsTr("Package databases older than two weeks"), qsTr("Sync databases have not been refreshed in 14+ days — installs pull outdated versions and fixes here may target stale packages"), "info", {
-                fix: Object.assign({label: qsTr("Update system")}, _rootFix(qsTr("Runs a FULL system upgrade (pacman -Syu). This updates every package, can take a while, and is the only safe way to refresh the databases (a plain -Sy risks partial upgrades). Review the system afterwards."), ["pacman -Syu --noconfirm"]))
+                fix: Object.assign({label: qsTr("Update system")}, _pacmanFix(qsTr("Runs a FULL system upgrade (pacman -Syu). This updates every package, can take a while, and is the only safe way to refresh the databases (a plain -Sy risks partial upgrades). Review the system afterwards."), ["pacman -Syu --noconfirm"]))
             });
 
         const pacnewCount = parseInt(flags.pacnew?.[0] ?? "0", 10);
@@ -456,12 +464,12 @@ Singleton {
         const isSsd = flags.fstrim?.[1] === "1";
         if (isSsd && !fstrimOn)
             push("fstrim", qsTr("SSD TRIM timer disabled"), qsTr("Without weekly TRIM the SSD slows down as it fills and wears faster"), "warn", {
-                fix: Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Enables systemd's weekly fstrim.timer. It trims mounted filesystems once a week; no data is touched."), ["systemctl enable --now fstrim.timer"]))
+                fix: Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Staged: verifies the fstrim.timer unit exists (reinstalls util-linux if not), then enables the weekly TRIM timer. No data is touched."), [`bash '${Quickshell.shellDir}/system/repair/service.sh' --pkg util-linux fstrim.timer`]))
             });
 
         if (flags.rtkit?.[0] === "inactive")
             push("rtkit", qsTr("rtkit daemon not running"), qsTr("PipeWire cannot get realtime priority without it — audio crackles under load"), "info", {
-                fix: Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Enables and starts rtkit-daemon, which grants PipeWire realtime scheduling priority."), ["systemctl enable --now rtkit-daemon"]))
+                fix: Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Staged: installs the rtkit package if it is missing (the unit cannot exist without it), then enables and starts rtkit-daemon, which grants PipeWire realtime scheduling priority. Streams its progress here."), [`bash '${Quickshell.shellDir}/system/repair/service.sh' --pkg rtkit rtkit-daemon.service`]))
             });
 
         if (SysInfo.isLaptop && flags.governor?.[0] === "performance" && !MaxPerf.enabled)
