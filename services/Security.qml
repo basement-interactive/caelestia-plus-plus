@@ -7,14 +7,14 @@ import qs.services
 
 // Shared state + overall security posture for the security center
 // (modules/protection/SecurityCenter.qml), the tabbed panel behind the bar
-// shield that hosts an Overview dashboard plus Protection, Firewall, HTTP
-// Debugger and Startup Apps. The data backends live in their own singletons
+// shield that hosts an Overview dashboard plus Protection, Firewall and
+// Startup Apps. The data backends live in their own singletons
 // (Protection, Firewall, Startup); this tracks which panel is showing and
 // rolls their states into one at-a-glance posture.
 Singleton {
     id: root
 
-    // overview | protection | firewall | http | startup
+    // overview | protection | firewall | startup
     property string tab: "overview"
     property bool panelOpen: false
 

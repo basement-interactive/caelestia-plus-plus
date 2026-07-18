@@ -5,7 +5,7 @@ import Caelestia.Config
 import qs.components
 import qs.services
 
-// Bar shield: opens the tabbed security center (Protection, Firewall, HTTP,
+// Bar shield: opens the tabbed security center (Protection, Firewall,
 // Startup). Reflects both guards at once:
 //   neither running -> dim struck shield
 //   something frozen/pending -> red shield-with-! that pulses + count badge

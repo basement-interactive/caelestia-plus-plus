@@ -10,8 +10,8 @@ import qs.components.containers
 import qs.components.controls
 import qs.services
 
-// Tabbed security center behind the bar shield: Protection, Firewall, HTTP
-// Debugger and Startup Apps. Each tab is a self-contained component that fills
+// Tabbed security center behind the bar shield: Overview, Protection,
+// Firewall and Startup Apps. Each tab is a self-contained component that fills
 // the card body; this file owns the window chrome, the tab strip, and the
 // shared open/close animation. Dismiss: click the scrim or press Escape.
 Scope {
@@ -24,7 +24,6 @@ Scope {
         {id: "overview", label: qsTr("Overview"), icon: "space_dashboard", badge: 0},
         {id: "protection", label: qsTr("Protection"), icon: "security", badge: Protection.pendingCount},
         {id: "firewall", label: qsTr("Firewall"), icon: "gpp_good", badge: Firewall.pendingCount},
-        {id: "http", label: qsTr("HTTP"), icon: "travel_explore", badge: Http.heldCount},
         {id: "startup", label: qsTr("Startup"), icon: "rocket_launch", badge: 0}
     ]
 
@@ -286,8 +285,6 @@ Scope {
                                 return "ProtectionTab.qml";
                             case "firewall":
                                 return "FirewallTab.qml";
-                            case "http":
-                                return "HttpTab.qml";
                             case "startup":
                                 return "StartupTab.qml";
                             default:
