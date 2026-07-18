@@ -2,67 +2,86 @@
 # Root half of the "Anti-Heat" feature. Run by anti-heat.service while the
 # mode is on.
 #
-#   run      loop forever, re-applying the heat caps (default)
-#   restore  lift the caps back to stock ceilings (service ExecStopPost)
+#   run      loop forever, re-applying the heat measures (default)
+#   restore  put everything back to stock (service ExecStopPost)
 #
-# The heat lever here is a set of SMU power/thermal limits (ryzenadj power
-# mailbox), NOT Curve Optimizer. On this Rembrandt + locked ThinkPad BIOS the
-# SMU rejects set_coall ("set_coall is rejected by SMU"), so the old undervolt
-# was a permanent no-op. Power/thermal caps go through a different SMU mailbox
-# that firmware does NOT lock, and unlike a CO undervolt they actually bound
-# heat: the package can no longer boost past the sustained-power / Tctl target.
+# Contract: anti-heat NEVER trades performance for temperature. Every lever
+# here cools without lowering ceilings — no STAPM/fast/slow power caps, no
+# governor changes, no clock limits. What runs depends on the hardware:
 #
-# The limits are re-applied every 30s because suspend and EC profile events
-# silently reset them to stock.
+#   AMD (SMU accepts it)  Curve Optimizer undervolt via ryzenadj set-coall:
+#                         same clocks at lower voltage, conservative -10.
+#                         Locked firmware (many OEM BIOSes) rejects it —
+#                         logged once, skipped.
+#   Intel                 `intel-undervolt apply` when the tool AND its
+#                         config exist (we never invent voltage offsets).
+#   AMD mobile APU        Tctl overheat guard at 90C: below firmware's
+#                         ~100C shutdown, above any healthy sustained load —
+#                         it only ever bites when the machine is actually
+#                         overheating.
+#   ThinkPads             early fan curve (thinkfan-cool): fans lead the
+#                         heat instead of chasing it. Pure gain.
 #
-# Safety posture:
-#   - These are LIMITS, never overclocks: they only lower ceilings, so the
-#     worst case is a few percent less sustained boost, never instability.
-#   - restore raises the ceilings back to stock-class values; a reboot also
-#     fully resets them via BIOS/EC defaults.
-#   - The companion fan curve (thinkfan-cool) starts fans earlier than the
-#     EC's ~75C default, but only when no stronger curve (bed/max) is active;
-#     EC auto keeps running whenever thinkfan-cool is stopped.
+# Re-applied every 30s because suspend and EC profile events silently reset
+# the SMU values to stock.
 set -u
 
-# --- Anti-heat caps (tune here) --------------------------------------------
-# Thermal target: SMU trims boost to hold the package at/under this (deg C).
-TCTL_TEMP=80
-# Sustained / burst / average power limits (mW). Stock 7735U is ~28W class;
-# these pull the sustained envelope down to ~20-25W for a large temp drop at
-# a small sustained-perf cost. STAPM is clamped to the slow limit by the SMU.
-STAPM_LIMIT=20000
-FAST_LIMIT=25000
-SLOW_LIMIT=22000
+# Conservative CO offset: crashes from undervolting show up under LIGHT load
+# (idle/browsing), not stress tests. Lower magnitude if a machine misbehaves.
+CO_OFFSET=-10
+# Overheat guard only — not a performance cap (stock Tctl is 95-100)
+GUARD_TCTL=90
 
-# --- Stock ceilings for restore (OFF path) ---------------------------------
-# Not byte-exact BIOS defaults (those are unknown), but high enough to hand
-# governing back to the EC/BIOS. A reboot restores exact defaults.
-STOCK_TCTL=95
-STOCK_STAPM=30000
-STOCK_FAST=40000
-STOCK_SLOW=30000
-# ---------------------------------------------------------------------------
+CPU_VENDOR=$(awk -F': ' '/vendor_id/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)
 
-# Journal-visible state transitions only (no 30s spam) — same contract as
-# max-perf-apply: a silent ryzenadj failure is never acceptable.
-ryz_state=""
+is_laptop() {
+    local t
+    t=$(cat /sys/class/dmi/id/chassis_type 2>/dev/null || echo 0)
+    [[ "$t" =~ ^(8|9|10|11|14|31|32)$ ]] && return 0
+    compgen -G "/sys/class/power_supply/BAT*" >/dev/null
+}
+LAPTOP=false
+is_laptop && LAPTOP=true
 
-apply_caps() {
-    local out
-    out=$(ryzenadj \
-        --tctl-temp="$TCTL_TEMP" \
-        --stapm-limit="$STAPM_LIMIT" \
-        --fast-limit="$FAST_LIMIT" \
-        --slow-limit="$SLOW_LIMIT" 2>&1)
+# ryzenadj set-coall encodes negative offsets as 32-bit two's complement
+co_value() {
+    printf '0x%08X' $((0x100000000 + $1))
+}
+
+# Journal-visible state transitions only (no 30s spam) — a silent ryzenadj
+# failure is never acceptable, but a locked SMU should not spam either.
+amd_state=""
+intel_state=""
+
+apply_amd() {
+    [[ "$CPU_VENDOR" == AuthenticAMD ]] || return 0
+    command -v ryzenadj >/dev/null || return 0
+    local args=(--set-coall="$(co_value $CO_OFFSET)") out
+    $LAPTOP && args+=(--tctl-temp="$GUARD_TCTL")
+    out=$(ryzenadj "${args[@]}" 2>&1)
     if [[ $? -ne 0 || "$out" =~ [Rr]eject|[Ff]ail|[Uu]nable|[Ee]rror ]]; then
-        if [[ "$ryz_state" != failed ]]; then
-            echo "ryzenadj FAILED — heat caps NOT applied (is ryzen_smu loaded?): ${out:0:300}" >&2
-            ryz_state=failed
+        if [[ "$amd_state" != failed ]]; then
+            echo "SMU rejected the undervolt (locked firmware?) — anti-heat continues fan-side only: ${out:0:300}" >&2
+            amd_state=failed
         fi
-    elif [[ "$ryz_state" != ok ]]; then
-        echo "heat caps applied: tctl=${TCTL_TEMP}C stapm=${STAPM_LIMIT} fast=${FAST_LIMIT} slow=${SLOW_LIMIT} mW"
-        ryz_state=ok
+    elif [[ "$amd_state" != ok ]]; then
+        echo "applied: Curve Optimizer $CO_OFFSET$($LAPTOP && echo ", Tctl guard ${GUARD_TCTL}C")"
+        amd_state=ok
+    fi
+}
+
+apply_intel() {
+    [[ "$CPU_VENDOR" == GenuineIntel ]] || return 0
+    command -v intel-undervolt >/dev/null || return 0
+    [[ -f /etc/intel-undervolt.conf ]] || return 0
+    if intel-undervolt apply >/dev/null 2>&1; then
+        if [[ "$intel_state" != ok ]]; then
+            echo "applied: intel-undervolt offsets from /etc/intel-undervolt.conf"
+            intel_state=ok
+        fi
+    elif [[ "$intel_state" != failed ]]; then
+        echo "intel-undervolt apply failed (locked MSR / plundervolt mitigation?)" >&2
+        intel_state=failed
     fi
 }
 
@@ -70,23 +89,32 @@ apply_caps() {
 # fan while they run (thinkfan-cool Conflicts= them, so it is kicked off when
 # they start). Once they stop, this reconciler brings the cool curve back.
 ensure_fan_curve() {
+    [[ -f /etc/thinkfan-cool.yaml ]] || return 0
     if systemctl -q is-active thinkfan-bed.service || systemctl -q is-active thinkfan-max.service; then
         return
     fi
     systemctl -q is-active thinkfan-cool.service || systemctl start thinkfan-cool.service
 }
 
+restore() {
+    if [[ "$CPU_VENDOR" == AuthenticAMD ]] && command -v ryzenadj >/dev/null; then
+        local args=(--set-coall=0x00000000)
+        $LAPTOP && args+=(--tctl-temp=95)
+        ryzenadj "${args[@]}" >/dev/null 2>&1 || true
+    fi
+    # intel-undervolt has no unapply; offsets clear on reboot and are tiny.
+    # thinkfan-cool is stopped by anti-heat-sync; EC auto fan takes over.
+}
+
 case "${1:-run}" in
 restore)
-    ryzenadj \
-        --tctl-temp="$STOCK_TCTL" \
-        --stapm-limit="$STOCK_STAPM" \
-        --fast-limit="$STOCK_FAST" \
-        --slow-limit="$STOCK_SLOW" >/dev/null 2>&1 || true
+    restore
     ;;
 run)
+    echo "anti-heat starting: laptop=$LAPTOP cpu=${CPU_VENDOR:-unknown}"
     while :; do
-        apply_caps
+        apply_amd
+        apply_intel
         ensure_fan_curve
         sleep 30
     done

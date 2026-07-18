@@ -10,9 +10,9 @@ import qs.utils
 // System health scanner behind the debug window's "System scan" tab. Probes
 // everything the shell needs to run at full function — runtime binaries, the
 // power-profiles daemon, the root-half feature installers, pending shell
-// updates — and attaches a one-click fix to each finding where one is safe
-// to automate (package installs and services go through pkexec; root config
-// edits only get copied to the clipboard).
+// updates — and attaches a one-click fix to each finding. Everything that
+// needs root (package installs, systemctl, the feature installers, pacman
+// config) goes through pkexec, so the user only ever types a password.
 //
 // A scan also runs once at startup: if it finds missing packages that were
 // not dismissed before, SetupPrompt (modules/debug) shows a centered offer
@@ -79,9 +79,15 @@ grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ig
         case "update":
             ShellUpdates.update();
             break;
-        case "copy":
-            Quickshell.execDetached(["wl-copy", r.fixData]);
-            Toaster.toast(qsTr("Command copied"), qsTr("Run it in a terminal to fix this"), "content_copy");
+        case "roothalf":
+            busyId = id;
+            fixProc.command = ["pkexec", "bash", `${Quickshell.shellDir}/system/${r.fixData}/install.sh`];
+            fixProc.running = true;
+            break;
+        case "ignorepkg":
+            busyId = id;
+            fixProc.command = ["pkexec", "sh", "-c", "printf 'IgnorePkg = caelestia++-shell caelestia++-cli\\n' >> /etc/pacman.conf"];
+            fixProc.running = true;
             break;
         }
     }
@@ -157,11 +163,11 @@ grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ig
             rows.push({
                 id: `roothalf-${h.id}`,
                 name: h.installed ? qsTr("%1 root half installed").arg(h.name) : qsTr("%1 root half missing").arg(h.name),
-                detail: h.installed ? qsTr("Feature fully available") : qsTr("The %1 feature stays disabled until its privileged half is installed").arg(h.name),
+                detail: h.installed ? qsTr("Feature fully available") : qsTr("The %1 feature stays inactive until its privileged half is installed (asks for your password)").arg(h.name),
                 status: h.installed ? "ok" : "warn",
-                fixType: h.installed ? "none" : "copy",
-                fixData: `sudo ${Quickshell.shellDir}/system/${h.dir}/install.sh`,
-                fixLabel: h.installed ? "" : qsTr("Copy fix")
+                fixType: h.installed ? "none" : "roothalf",
+                fixData: h.dir,
+                fixLabel: h.installed ? "" : qsTr("Install")
             });
         }
 
@@ -170,9 +176,9 @@ grep -qs 'IgnorePkg.*caelestia' /etc/pacman.conf && echo "ignpkg|ok" || echo "ig
             name: flags.ignpkg === "ok" ? qsTr("Pacman IgnorePkg set") : qsTr("Pacman IgnorePkg not set"),
             detail: flags.ignpkg === "ok" ? qsTr("Repo packages won't clobber the git checkout") : qsTr("A caelestia++ repo package could overwrite this checkout on -Syu"),
             status: flags.ignpkg === "ok" ? "ok" : "warn",
-            fixType: flags.ignpkg === "ok" ? "none" : "copy",
-            fixData: `sudo sh -c 'printf "IgnorePkg = caelestia++-shell caelestia++-cli\\n" >> /etc/pacman.conf'`,
-            fixLabel: flags.ignpkg === "ok" ? "" : qsTr("Copy fix")
+            fixType: flags.ignpkg === "ok" ? "none" : "ignorepkg",
+            fixData: "",
+            fixLabel: flags.ignpkg === "ok" ? "" : qsTr("Fix")
         });
 
         rows.push({

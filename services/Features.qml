@@ -24,46 +24,44 @@ Singleton {
     readonly property string statePath: `${Paths.state}/features.json`
     readonly property bool lidStay: props.lidStay
 
-    // On desktops the battery popout (Dynamic's laptop home) doesn't exist,
-    // so Dynamic surfaces here instead — tuned performance-first by the
-    // daemon when it detects no battery.
-    readonly property var desktopFeatures: [
-        {
-            id: "dynamic",
-            name: qsTr("Dynamic performance"),
-            desc: Dynamic.installed ? qsTr("Auto-switches balanced/performance from live CPU load") : qsTr("Root half missing — run: sudo system/dynamic/install.sh"),
-            icon: "auto_mode",
-            enabled: Dynamic.enabled
-        }
-    ]
-
     // Drives the menu and the bar badge. Rebuilt whenever any mode flips.
-    // Bed mode is in the battery popout, game mode and caffeine in the
-    // utilities cards. The laptop entries are hardware-specific (power
-    // plans, undervolt, lid) and gate on the chassis.
-    readonly property var features: !SysInfo.isLaptop ? desktopFeatures : [
+    // Bed mode is in the battery popout (laptops), game mode and caffeine in
+    // the utilities cards. Max-perf and anti-heat adapt to the hardware
+    // root-side (system/*/…-apply detect chassis, CPU vendor and tools), so
+    // both surface on laptops and desktops; enabling either installs its
+    // root half through pkexec on first use, no terminal needed.
+    readonly property var features: [
         {
             id: "maxPerf",
             name: qsTr("Maximum performance"),
-            desc: MaxPerf.installed ? qsTr("50W power plan, pinned CPU/GPU clocks, fans flat out from 48C") : qsTr("Root half missing — run: sudo system/max-perf/install.sh"),
+            desc: MaxPerf.installing ? qsTr("Setting up the root half…") : MaxPerf.installed ? qsTr("Pins CPU/GPU at their limits, tuned to this machine") : qsTr("First enable sets up the privileged half (asks for your password)"),
             icon: "bolt",
             enabled: MaxPerf.enabled
         },
+        {
+            id: "antiHeat",
+            name: qsTr("Anti-Heat"),
+            desc: AntiHeat.installing ? qsTr("Setting up the root half…") : AntiHeat.installed ? qsTr("Runs cooler at full speed: undervolt and early fans, never power caps") : qsTr("First enable sets up the privileged half (asks for your password)"),
+            icon: "ac_unit",
+            enabled: AntiHeat.enabled
+        }
+    ].concat(SysInfo.isLaptop ? [
         {
             id: "lidStay",
             name: qsTr("Stay awake on lid close"),
             desc: qsTr("Closing the lid neither suspends nor idles the laptop"),
             icon: "laptop_windows",
             enabled: props.lidStay
-        },
-        {
-            id: "antiHeat",
-            name: qsTr("Anti-Heat"),
-            desc: AntiHeat.installed ? qsTr("Undervolt + early fans: cooler at the same speed") : qsTr("Root half missing — run: sudo system/anti-heat/install.sh"),
-            icon: "ac_unit",
-            enabled: AntiHeat.enabled
         }
-    ]
+    ] : [
+        {
+            id: "dynamic",
+            name: qsTr("Dynamic performance"),
+            desc: Dynamic.installing ? qsTr("Setting up the root half…") : Dynamic.installed ? qsTr("Auto-switches balanced/performance from live CPU load") : qsTr("First enable sets up the privileged half (asks for your password)"),
+            icon: "auto_mode",
+            enabled: Dynamic.enabled
+        }
+    ])
     readonly property int activeCount: features.filter(f => f.enabled).length
 
     function toggle(featureId: string): void {

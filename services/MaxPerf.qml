@@ -10,10 +10,10 @@ import qs.utils
 // "Maximum performance" mode: pin the machine at its limits. Like BedMode,
 // this singleton only flips a plain state file it owns; the privileged work
 // (ryzenadj 42/50/45W loop, pinned governor, amdgpu high, thinkfan-max) runs
-// root-side via a path unit. See system/max-perf/ for that half and the
-// one-time `sudo install.sh` it needs — `installed` tracks whether that has
-// been done, because without it this toggle is power-profile-and-eye-candy
-// only and the fans never change.
+// root-side via a path unit. See system/max-perf/ for that half; the first
+// enable installs it automatically through pkexec (`installed` tracks that),
+// because without it this toggle is power-profile-and-eye-candy only and
+// the fans never change.
 //
 // Mutually exclusive with BedMode (opposite fan curves), and drags GameMode
 // along so the compositor sheds its eye candy too.
@@ -24,6 +24,7 @@ Singleton {
     readonly property bool enabled: stateFile.checked
     // True once system/max-perf/install.sh has been run (root path unit exists).
     property bool installed: false
+    property bool installing: false
 
     function setEnabled(value: bool): void {
         if (value === root.enabled)
@@ -41,11 +42,32 @@ Singleton {
         Quickshell.execDetached(["powerprofilesctl", "set", value ? "performance" : "balanced"]);
         GameMode.enabled = value;
 
-        if (value && !root.installed) {
-            installCheck.running = true; // re-probe in case it was just installed
-            Toaster.toast(qsTr("Maximum performance (partial)"), qsTr("Root half missing — run: sudo system/max-perf/install.sh"), "warning");
-        } else {
-            Toaster.toast(value ? qsTr("Maximum performance engaged") : qsTr("Maximum performance off"), value ? qsTr("50W limits, pinned clocks, fans flat out from 48C") : qsTr("Power plan, clocks and fans restored"), "bolt");
+        if (value && !root.installed && !root.installing) {
+            root.installing = true;
+            Toaster.toast(qsTr("Setting up Maximum performance"), qsTr("Installing the privileged half — enter your password"), "key");
+            installer.running = true;
+        } else if (!root.installing) {
+            Toaster.toast(value ? qsTr("Maximum performance engaged") : qsTr("Maximum performance off"), value ? qsTr("CPU/GPU pinned at their limits, tuned to this machine") : qsTr("Power plan, clocks and fans restored"), "bolt");
+        }
+    }
+
+    Process {
+        id: installer
+
+        command: ["pkexec", "bash", `${Quickshell.shellDir}/system/max-perf/install.sh`]
+        stdout: SplitParser {
+            onRead: data => console.info("max-perf install:", data)
+        }
+        onExited: code => {
+            root.installing = false;
+            if (code === 0) {
+                root.installed = true;
+                Toaster.toast(qsTr("Maximum performance ready"), qsTr("Root half installed — the mode is now active"), "bolt");
+            } else {
+                stateFile.checked = false;
+                stateFile.setText("0\n");
+                Toaster.toast(qsTr("Setup not completed"), code === 126 || code === 127 ? qsTr("Authentication was dismissed — toggle again to retry") : qsTr("Installer failed (code %1) — see the debug console").arg(code), "warning");
+            }
         }
     }
 

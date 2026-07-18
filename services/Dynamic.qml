@@ -29,6 +29,7 @@ Singleton {
     readonly property string currentTier: tierFile.tier
     // True once system/dynamic/install.sh has been run (root path unit exists).
     property bool installed: false
+    property bool installing: false
 
     function setEnabled(value: bool): void {
         if (value === root.enabled)
@@ -40,11 +41,32 @@ Singleton {
         if (value)
             MaxPerf.setEnabled(false); // Max-perf owns the plan; never both
 
-        if (value && !root.installed) {
-            installCheck.running = true; // re-probe in case it was just installed
-            Toaster.toast(qsTr("Dynamic (inactive)"), qsTr("Root half missing — run: sudo system/dynamic/install.sh"), "warning");
-        } else {
+        if (value && !root.installed && !root.installing) {
+            root.installing = true;
+            Toaster.toast(qsTr("Setting up Dynamic power"), qsTr("Installing the privileged half — enter your password"), "key");
+            installer.running = true;
+        } else if (!root.installing) {
             Toaster.toast(value ? qsTr("Dynamic power engaged") : qsTr("Dynamic power off"), value ? qsTr("Auto-switching Eco/Balanced/Performance by load and power") : qsTr("Manual power profile restored"), "auto_mode");
+        }
+    }
+
+    Process {
+        id: installer
+
+        command: ["pkexec", "bash", `${Quickshell.shellDir}/system/dynamic/install.sh`]
+        stdout: SplitParser {
+            onRead: data => console.info("dynamic install:", data)
+        }
+        onExited: code => {
+            root.installing = false;
+            if (code === 0) {
+                root.installed = true;
+                Toaster.toast(qsTr("Dynamic power ready"), qsTr("Root half installed — the mode is now active"), "auto_mode");
+            } else {
+                stateFile.checked = false;
+                stateFile.setText("0\n");
+                Toaster.toast(qsTr("Setup not completed"), code === 126 || code === 127 ? qsTr("Authentication was dismissed — toggle again to retry") : qsTr("Installer failed (code %1) — see the debug console").arg(code), "warning");
+            }
         }
     }
 

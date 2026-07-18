@@ -24,6 +24,7 @@ Singleton {
     readonly property bool enabled: stateFile.checked
     // True once system/anti-heat/install.sh has been run (root path unit exists).
     property bool installed: false
+    property bool installing: false
 
     function setEnabled(value: bool): void {
         if (value === root.enabled)
@@ -32,11 +33,32 @@ Singleton {
         stateFile.checked = value;
         stateFile.setText(value ? "1\n" : "0\n");
 
-        if (value && !root.installed) {
-            installCheck.running = true; // re-probe in case it was just installed
-            Toaster.toast(qsTr("Anti-Heat (inactive)"), qsTr("Root half missing — run: sudo system/anti-heat/install.sh"), "warning");
-        } else {
+        if (value && !root.installed && !root.installing) {
+            root.installing = true;
+            Toaster.toast(qsTr("Setting up Anti-Heat"), qsTr("Installing the privileged half — enter your password"), "key");
+            installer.running = true;
+        } else if (!root.installing) {
             Toaster.toast(value ? qsTr("Anti-Heat engaged") : qsTr("Anti-Heat off"), value ? qsTr("Undervolt applied, fans lead the heat — no speed lost") : qsTr("Stock voltage curve and fan behaviour restored"), "ac_unit");
+        }
+    }
+
+    Process {
+        id: installer
+
+        command: ["pkexec", "bash", `${Quickshell.shellDir}/system/anti-heat/install.sh`]
+        stdout: SplitParser {
+            onRead: data => console.info("anti-heat install:", data)
+        }
+        onExited: code => {
+            root.installing = false;
+            if (code === 0) {
+                root.installed = true;
+                Toaster.toast(qsTr("Anti-Heat ready"), qsTr("Root half installed — the mode is now active"), "ac_unit");
+            } else {
+                stateFile.checked = false;
+                stateFile.setText("0\n");
+                Toaster.toast(qsTr("Setup not completed"), code === 126 || code === 127 ? qsTr("Authentication was dismissed — toggle again to retry") : qsTr("Installer failed (code %1) — see the debug console").arg(code), "warning");
+            }
         }
     }
 

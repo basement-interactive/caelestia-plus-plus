@@ -379,7 +379,7 @@ Scope {
                                 case "info":
                                     return Colours.palette.m3outline;
                                 default:
-                                    return Colours.palette.m3primary;
+                                    return "#4bd97b";
                                 }
                             }
 

@@ -26,8 +26,10 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # The unit files and scripts are written against the dev machine's home;
 # rewrite them for whoever is running the install.
 user=${SUDO_USER:-}
+[[ -z "$user" && -n "${PKEXEC_UID:-}" ]] && user=$(id -nu "$PKEXEC_UID")
+[[ -z "$user" ]] && user=$(stat -c %U "$here")
 if [[ -z $user || $user == root ]]; then
-    echo "Run via sudo from your normal user session (needs \$SUDO_USER)." >&2
+    echo "Could not determine the target user." >&2
     exit 1
 fi
 home=$(getent passwd "$user" | cut -d: -f6)

@@ -6,6 +6,7 @@ import Caelestia.Config
 import qs.components
 import qs.components.controls
 import qs.services
+import qs.utils
 
 Column {
     id: root
@@ -211,7 +212,10 @@ Column {
 
     Item {
         width: root.width
-        height: Math.max(bedIcon.implicitHeight, bedLabel.implicitHeight, bedSwitch.implicitHeight)
+        height: visible ? Math.max(bedIcon.implicitHeight, bedLabel.implicitHeight, bedSwitch.implicitHeight) : 0
+        // Bed mode is a laptop fan curve; desktops can still get this popout
+        // via peripheral/UPS batteries
+        visible: SysInfo.isLaptop
 
         MaterialIcon {
             id: bedIcon
@@ -249,6 +253,7 @@ Column {
 
     StyledText {
         width: root.width
+        visible: SysInfo.isLaptop
 
         text: qsTr("Much more sensitive fan curve for restricted airflow, e.g. on a bed")
         color: Colours.palette.m3onSurfaceVariant

@@ -1,30 +1,48 @@
 #!/usr/bin/env bash
 # The "insane" half of max-perf mode. Run by max-perf.service while the mode
-# is on; re-applies everything every 5s because the EC (lap-mode sensing,
-# profile changes) silently claws limits back if it is set only once.
+# is on; re-applies everything every 5s because firmware (EC lap-mode
+# sensing, profile changes) silently claws limits back if it is set once.
 #
 #   run      loop forever, re-applying the performance plan (default)
 #   restore  put every knob back to its everyday value (service ExecStopPost)
 #
-# Safety posture (deliberate, do not "improve" away):
-#   - Tctl targets sit below the silicon's 100C hard limit, so the SMU still
-#     throttles with margin; firmware thermal shutdown is untouched.
-#   - On battery the power limits drop to a battery-safe tier: a 50W package
-#     sustained from a 7735U hammers discharge current and battery wear.
-#   - VRM/current limits are never touched.
-#   - Fan control failing open is fine: the EC's automatic curve keeps
-#     running whenever thinkfan-max is not active.
+# Hardware-adaptive: probes the machine once at start and only touches knobs
+# that exist here. What that means per platform:
+#   any CPU        scaling_governor performance, EPP performance where the
+#                  driver exposes it, power-profiles-daemon performance
+#   AMD cpufreq    boost on            Intel pstate   no_turbo off
+#   laptops        platform_profile performance (ThinkPad/ACPI firmware)
+#   AMD mobile APU ryzenadj --max-performance + Tctl 95 on AC power only —
+#                  the SMU's own performance profile, so limits stay
+#                  spec-appropriate instead of hardcoded watts; on battery
+#                  the stock envelope stays (discharge current and wear)
+#   amdgpu         power_dpm_force_performance_level high (clocks pinned)
+#   NVIDIA         persistence mode on (no clock locking: model-specific)
 #
-# Knobs, in order of impact on this machine (Ryzen 7 PRO 7735U / 680M):
-#   ryzenadj            AC: STAPM 42W / fast 50W / slow 45W / Tctl 95
-#                       battery: 30 / 35 / 32 W / Tctl 90
-#                       + SMU max-performance mode (stock STAPM is 28W)
-#   scaling_governor    performance = P-states pinned high (EPP ignored)
-#   cpufreq boost       on
-#   platform_profile    performance (ThinkPad ACPI)
-#   power profile       performance (power-profiles-daemon)
-#   amdgpu dpm level    high = iGPU clocks pinned instead of ramping
+# Safety posture (deliberate, do not "improve" away):
+#   - Nothing here raises voltage or overrides firmware thermal shutdown.
+#   - VRM/current limits are never touched.
+#   - Fan control failing open is fine: the firmware's automatic curve keeps
+#     running whenever no thinkfan unit is active.
 set -u
+
+SNAPSHOT=/run/caelestia-max-perf.snapshot
+
+# --- One-shot hardware probe ------------------------------------------------
+is_laptop() {
+    local t
+    t=$(cat /sys/class/dmi/id/chassis_type 2>/dev/null || echo 0)
+    [[ "$t" =~ ^(8|9|10|11|14|31|32)$ ]] && return 0
+    compgen -G "/sys/class/power_supply/BAT*" >/dev/null
+}
+
+CPU_VENDOR=$(awk -F': ' '/vendor_id/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)
+LAPTOP=false
+is_laptop && LAPTOP=true
+USE_RYZENADJ=false
+if $LAPTOP && [[ "$CPU_VENDOR" == AuthenticAMD ]] && command -v ryzenadj >/dev/null; then
+    USE_RYZENADJ=true
+fi
 
 on_ac() {
     local online
@@ -33,6 +51,7 @@ on_ac() {
     done
     return 1
 }
+
 # Journal-visible state transitions only (no 5s spam): logs once when the
 # limits start applying and once when they stop working. ryzenadj can fail
 # WITHOUT the /dev/mem path (IO_STRICT_DEVMEM kernels) — the ryzen_smu
@@ -40,42 +59,75 @@ on_ac() {
 ryz_state=""
 
 apply_limits() {
-    local args out
-    if on_ac; then
-        args=(--stapm-limit=42000 --fast-limit=50000 --slow-limit=45000 --tctl-temp=95)
-    else
-        args=(--stapm-limit=30000 --fast-limit=35000 --slow-limit=32000 --tctl-temp=90)
+    $USE_RYZENADJ || return 0
+    local out
+    if ! on_ac; then
+        if [[ "$ryz_state" != battery ]]; then
+            echo "on battery — leaving the stock SMU power envelope"
+            ryz_state=battery
+        fi
+        return 0
     fi
-    out=$(ryzenadj "${args[@]}" --max-performance 2>&1)
+    out=$(ryzenadj --max-performance --tctl-temp=95 2>&1)
     if [[ $? -ne 0 || "$out" =~ [Ff]ail|[Uu]nable|[Ee]rror ]]; then
         if [[ "$ryz_state" != failed ]]; then
-            echo "ryzenadj FAILED — power limits NOT applied (is ryzen_smu loaded?): ${out:0:300}" >&2
+            echo "ryzenadj FAILED — SMU performance mode NOT applied (is ryzen_smu loaded?): ${out:0:300}" >&2
             ryz_state=failed
         fi
     elif [[ "$ryz_state" != ok ]]; then
-        echo "ryzenadj limits applied: ${args[*]}"
+        echo "ryzenadj SMU max-performance mode applied (Tctl 95)"
         ryz_state=ok
     fi
 }
 
+# Remember what the machine ran with so restore puts it back instead of
+# guessing a distro default
+snapshot() {
+    [[ -f "$SNAPSHOT" ]] && return
+    {
+        echo "governor=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null || echo schedutil)"
+        echo "epp=$(cat /sys/devices/system/cpu/cpufreq/policy0/energy_performance_preference 2>/dev/null || true)"
+    } > "$SNAPSHOT"
+}
+
 apply() {
+    snapshot
     apply_limits
     for p in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
         echo performance > "$p" 2>/dev/null || true
     done
+    for p in /sys/devices/system/cpu/cpufreq/policy*/energy_performance_preference; do
+        echo performance > "$p" 2>/dev/null || true
+    done
     echo 1 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+    echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
     echo performance > /sys/firmware/acpi/platform_profile 2>/dev/null || true
-    powerprofilesctl set performance 2>/dev/null || true
+    command -v powerprofilesctl >/dev/null && powerprofilesctl set performance 2>/dev/null || true
     for g in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
         echo high > "$g" 2>/dev/null || true
     done
+    command -v nvidia-smi >/dev/null && nvidia-smi -pm 1 >/dev/null 2>&1 || true
 }
 
 restore() {
-    powerprofilesctl set balanced 2>/dev/null || true
+    local governor="" epp=""
+    if [[ -f "$SNAPSHOT" ]]; then
+        governor=$(awk -F= '/^governor=/{print $2}' "$SNAPSHOT")
+        epp=$(awk -F= '/^epp=/{print $2}' "$SNAPSHOT")
+        rm -f "$SNAPSHOT"
+    fi
+    # Snapshot is taken before the first knob write, so "performance" in it
+    # means that really was the default; only guess when there is no snapshot
+    [[ -n "$governor" ]] || governor=$([[ -d /sys/devices/system/cpu/intel_pstate || -d /sys/devices/system/cpu/amd_pstate ]] && echo powersave || echo schedutil)
+    command -v powerprofilesctl >/dev/null && powerprofilesctl set balanced 2>/dev/null || true
     for p in /sys/devices/system/cpu/cpufreq/policy*/scaling_governor; do
-        echo powersave > "$p" 2>/dev/null || true
+        echo "$governor" > "$p" 2>/dev/null || true
     done
+    if [[ -n "$epp" ]]; then
+        for p in /sys/devices/system/cpu/cpufreq/policy*/energy_performance_preference; do
+            echo "$epp" > "$p" 2>/dev/null || true
+        done
+    fi
     for g in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
         echo auto > "$g" 2>/dev/null || true
     done
@@ -88,6 +140,7 @@ restore)
     restore
     ;;
 run)
+    echo "max-perf starting: laptop=$LAPTOP cpu=${CPU_VENDOR:-unknown} ryzenadj=$USE_RYZENADJ"
     while :; do
         apply
         sleep 5

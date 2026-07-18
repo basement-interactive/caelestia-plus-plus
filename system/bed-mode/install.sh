@@ -19,19 +19,33 @@ if ! command -v thinkfan >/dev/null; then
 fi
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+target_user=${SUDO_USER:-}
+[[ -z "$target_user" && -n "${PKEXEC_UID:-}" ]] && target_user=$(id -nu "$PKEXEC_UID")
+[[ -z "$target_user" ]] && target_user=$(stat -c %U "$here")
+if [[ -z "$target_user" || "$target_user" == root ]]; then
+    echo "Could not determine the target user." >&2
+    exit 1
+fi
+target_home=$(getent passwd "$target_user" | cut -d: -f6)
+
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+for f in bed-mode-sync bed-mode-sync.path; do
+    sed "s|/home/john|$target_home|g" "$here/$f" > "$stage/$f"
+done
 
 install -Dm644 "$here/thinkfan-fan-control.conf" /etc/modprobe.d/thinkfan-fan-control.conf
 install -Dm644 "$here/thinkfan-bed.yaml" /etc/thinkfan-bed.yaml
 install -Dm644 "$here/thinkfan-bed.service" /etc/systemd/system/thinkfan-bed.service
 install -Dm644 "$here/bed-mode-sync.service" /etc/systemd/system/bed-mode-sync.service
-install -Dm644 "$here/bed-mode-sync.path" /etc/systemd/system/bed-mode-sync.path
-install -Dm755 "$here/bed-mode-sync" /usr/local/bin/bed-mode-sync
+install -Dm644 "$stage/bed-mode-sync.path" /etc/systemd/system/bed-mode-sync.path
+install -Dm755 "$stage/bed-mode-sync" /usr/local/bin/bed-mode-sync
 
-state_dir=/home/john/.local/state/caelestia
+state_dir=$target_home/.local/state/caelestia
 state_file="$state_dir/bed-mode"
-install -d -o john -g john "$state_dir"
+install -d -o "$target_user" -g "$target_user" "$state_dir"
 [[ -f "$state_file" ]] || printf '0\n' > "$state_file"
-chown john:john "$state_file"
+chown "$target_user:$target_user" "$state_file"
 
 systemctl daemon-reload
 systemctl enable --now bed-mode-sync.path
