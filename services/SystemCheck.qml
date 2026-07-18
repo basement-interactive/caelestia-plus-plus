@@ -51,6 +51,14 @@ Singleton {
         fixLog.clear();
     }
 
+    function copyFixLog(): void {
+        const rows = [];
+        for (let i = 0; i < fixLog.count; i++)
+            rows.push(fixLog.get(i).line);
+        Quickshell.execDetached(["wl-copy", rows.join("\n")]);
+        Toaster.toast(qsTr("Fix log copied"), qsTr("%1 lines on the clipboard").arg(fixLog.count), "content_copy");
+    }
+
     // A root fix cannot even show its password prompt without an agent;
     // the confirmation cards warn on this instead of hanging silently
     readonly property bool polkitAgentMissing: results.some(r => r.id === "polkit-agent" && r.status === "fail")

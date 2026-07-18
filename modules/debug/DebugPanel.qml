@@ -652,6 +652,13 @@ Scope {
                             }
 
                             TextButton {
+                                visible: SystemCheck.pendingFix === null && SystemCheck.fixLog.count > 0
+                                text: qsTr("Copy log")
+                                type: TextButton.Tonal
+                                onClicked: SystemCheck.copyFixLog()
+                            }
+
+                            TextButton {
                                 visible: SystemCheck.busyId !== ""
                                 text: qsTr("Cancel fix")
                                 type: TextButton.Tonal

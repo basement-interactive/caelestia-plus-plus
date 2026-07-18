@@ -119,9 +119,23 @@ RowLayout {
             // style: keep the config's logo entry, or lead with one if absent.
             // The features wrench disappears when no feature applies (desktop).
             values: {
-                const entries = root.Config.bar.entries.filter(e => (e.enabled ?? true)
+                const configured = root.Config.bar.entries;
+                const entries = configured.filter(e => (e.enabled ?? true)
                     && !(e.id === "features" && Features.features.length === 0)
                     && !(e.id === "activeWindow" && !ShellPrefs.barShowActiveWindow));
+                // Fork-only entries: configs written by upstream caelestia
+                // (or an older fork) don't know these ids, so a foreign
+                // shell.json would silently drop the wrench and firewall.
+                // Inject them unless the config mentions the id itself —
+                // an explicit `enabled: false` still wins.
+                for (const id of ["firewall", "features"]) {
+                    if (configured.some(e => e.id === id))
+                        continue;
+                    if (id === "features" && Features.features.length === 0)
+                        continue;
+                    const at = entries.findIndex(e => ["tray", "clock", "statusIcons", "power"].includes(e.id));
+                    entries.splice(at === -1 ? entries.length : at, 0, {id});
+                }
                 if (ShellPrefs.barLogoEndcap || !ShellPrefs.barLogoShow)
                     return entries.filter(e => e.id !== "logo");
                 return entries.some(e => e.id === "logo") ? entries : [{

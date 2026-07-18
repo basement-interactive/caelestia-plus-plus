@@ -76,6 +76,30 @@ for c in tlp tuned tuned-ppd auto-cpufreq laptop-mode; do
 done
 [ "$found_conflict" = 0 ] && ok "none found"
 
+step "Checking the systemd job queue"
+jobs=$(systemctl list-jobs --no-legend --plain 2>/dev/null)
+njobs=$(printf '%s' "$jobs" | grep -c .)
+if [ "$njobs" -gt 0 ]; then
+    warn "$njobs stuck jobs — the boot transaction never finished, so every new service start queues behind it forever:"
+    printf '%s\n' "$jobs" | sed 's/^/     /'
+    if printf '%s' "$jobs" | grep -q plymouth-quit-wait; then
+        step "plymouth never exited (it waits for a signal the session never sent) — telling it to quit"
+        plymouth quit 2>/dev/null || true
+        timeout 10 systemctl stop plymouth-quit-wait.service 2>/dev/null || true
+    fi
+    step "Cancelling the remaining stuck jobs — boot finished ages ago, these are zombies blocking the queue"
+    systemctl cancel 2>&1 | sed 's/^/     /'
+    sleep 1
+    left=$(systemctl list-jobs --no-legend --plain 2>/dev/null | grep -c .)
+    if [ "$left" -eq 0 ]; then
+        ok "job queue is clear"
+    else
+        warn "$left jobs still queued — continuing, the start may still get through"
+    fi
+else
+    ok "no stuck jobs"
+fi
+
 diagnose_failure() {
     fail "$1 — this is what the daemon itself says:"
     journalctl -u power-profiles-daemon -b --no-pager -n 15 2>/dev/null | sed 's/^/     /'
@@ -92,6 +116,8 @@ ok "enabled"
 # which reads as the repair being stuck. Queue the job and poll instead, so
 # there is visible progress and an early exit the moment the unit fails.
 step "Starting power-profiles-daemon"
+# A unit that hit its start rate limit earlier refuses to start silently
+systemctl reset-failed power-profiles-daemon 2>/dev/null || true
 timeout 10 systemctl start --no-block power-profiles-daemon 2>&1 | sed 's/^/     /'
 waited=0
 while [ "$waited" -lt 45 ]; do
