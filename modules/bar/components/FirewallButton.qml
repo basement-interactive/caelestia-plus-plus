@@ -28,8 +28,8 @@ Item {
         implicitWidth: implicitHeight
         implicitHeight: icon.implicitHeight + Tokens.padding.small
         radius: Tokens.rounding.full
-        // Open on whichever guard is asking; default to Protection otherwise.
-        onClicked: Security.open(Firewall.pendingCount > 0 && Protection.pendingCount === 0 ? "firewall" : "protection")
+        // Jump to whichever guard is asking; otherwise land on the overview.
+        onClicked: Security.open(Protection.pendingCount > 0 ? "protection" : Firewall.pendingCount > 0 ? "firewall" : "overview")
     }
 
     MaterialIcon {

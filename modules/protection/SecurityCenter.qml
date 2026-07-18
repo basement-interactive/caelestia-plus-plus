@@ -21,16 +21,21 @@ Scope {
     readonly property var focusedScreen: Quickshell.screens.find(s => s.name === Hypr.focusedMonitor?.name) ?? Quickshell.screens[0]
 
     readonly property var tabs: [
+        {id: "overview", label: qsTr("Overview"), icon: "space_dashboard", badge: 0},
         {id: "protection", label: qsTr("Protection"), icon: "security", badge: Protection.pendingCount},
         {id: "firewall", label: qsTr("Firewall"), icon: "gpp_good", badge: Firewall.pendingCount},
         {id: "http", label: qsTr("HTTP"), icon: "travel_explore", badge: 0},
         {id: "startup", label: qsTr("Startup"), icon: "rocket_launch", badge: 0}
     ]
 
+    // Posture colour for the hero: green protected · amber attention · red alert.
+    readonly property color postureColour: Security.posture === 2 ? "#ff5c5c" : Security.posture === 1 ? "#ffc233" : "#4bd97b"
+    readonly property string postureIcon: Security.posture === 2 ? "gpp_bad" : Security.posture === 1 ? "gpp_maybe" : "verified_user"
+
     // Startup is a pull model (no daemon push), so refresh it whenever the
-    // panel opens or that tab is selected.
+    // panel opens or its tab (or the overview that summarises it) is selected.
     function _maybeRefreshStartup(): void {
-        if (root.open && Security.tab === "startup")
+        if (root.open && (Security.tab === "startup" || Security.tab === "overview"))
             Startup.refresh();
     }
     onOpenChanged: _maybeRefreshStartup()
@@ -92,8 +97,8 @@ Scope {
             anchors.top: parent.top
             anchors.topMargin: Tokens.sizes.bar.innerWidth + Math.max(Tokens.padding.small, Config.border.thickness) * 2 + Tokens.padding.large * 3
 
-            implicitWidth: 600
-            implicitHeight: Math.min(760, win.height * 0.82)
+            implicitWidth: 640
+            implicitHeight: Math.min(780, win.height * 0.82)
 
             radius: Tokens.rounding.large
             color: Qt.alpha(Colours.palette.m3surfaceContainer, 0.7)
@@ -131,10 +136,114 @@ Scope {
                     anchors.fill: parent
                     spacing: 0
 
-                    // Tab strip + close.
+                    // Posture hero: overall security state at a glance, tinted
+                    // green / amber / red. Persistent across every tab.
+                    StyledRect {
+                        Layout.fillWidth: true
+                        Layout.margins: Tokens.padding.small
+                        implicitHeight: heroRow.implicitHeight + Tokens.padding.large * 2
+                        radius: card.radius - Tokens.padding.small * 2
+                        color: Qt.alpha(root.postureColour, 0.1)
+
+                        Behavior on color {
+                            CAnim {}
+                        }
+
+                        RowLayout {
+                            id: heroRow
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.leftMargin: Tokens.padding.large
+                            anchors.rightMargin: Tokens.padding.medium
+                            spacing: Tokens.spacing.medium
+
+                            StyledRect {
+                                Layout.alignment: Qt.AlignVCenter
+                                implicitWidth: implicitHeight
+                                implicitHeight: heroIcon.implicitHeight + Tokens.padding.large
+                                radius: Tokens.rounding.full
+                                color: Qt.alpha(root.postureColour, 0.18)
+
+                                // Calm breath when protected, urgent pulse on alert.
+                                SequentialAnimation on scale {
+                                    running: root.open && win.visible
+                                    loops: Animation.Infinite
+                                    alwaysRunToEnd: true
+
+                                    Anim {
+                                        to: Security.posture === 2 ? 1.08 : 1.04
+                                        duration: Security.posture === 2 ? 1000 : 2600
+                                        type: Anim.Standard
+                                    }
+                                    Anim {
+                                        to: 1
+                                        duration: Security.posture === 2 ? 1000 : 2600
+                                        type: Anim.Standard
+                                    }
+                                }
+
+                                MaterialIcon {
+                                    id: heroIcon
+                                    anchors.centerIn: parent
+                                    text: root.postureIcon
+                                    fill: 1
+                                    color: root.postureColour
+                                    fontStyle: Tokens.font.icon.builders.large.scale(1.3).build()
+                                }
+                            }
+
+                            Column {
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignVCenter
+                                spacing: Tokens.spacing.extraSmall / 2
+
+                                StyledText {
+                                    text: Security.postureTitle()
+                                    color: Colours.palette.m3onSurface
+                                    font: Tokens.font.title.builders.small.weight(Font.Bold).build()
+                                }
+
+                                StyledText {
+                                    width: parent.width
+                                    text: Security.postureSubtitle()
+                                    color: Colours.palette.m3onSurfaceVariant
+                                    font: Tokens.font.body.small
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            MaterialIcon {
+                                id: closeBtn
+                                Layout.alignment: Qt.AlignTop
+                                text: "close"
+                                color: closeLayer.containsMouse ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
+                                scale: closeLayer.pressed ? 0.9 : 1
+
+                                Behavior on scale {
+                                    Anim {
+                                        type: closeLayer.pressed ? Anim.FastSpatial : Anim.Emphasized
+                                    }
+                                }
+
+                                StateLayer {
+                                    id: closeLayer
+                                    anchors.centerIn: parent
+                                    implicitWidth: parent.implicitHeight + Tokens.padding.medium
+                                    implicitHeight: implicitWidth
+                                    radius: Tokens.rounding.full
+                                    onClicked: Security.panelOpen = false
+                                }
+                            }
+                        }
+                    }
+
+                    // Tab strip.
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.margins: Tokens.padding.large
+                        Layout.leftMargin: Tokens.padding.large
+                        Layout.rightMargin: Tokens.padding.large
+                        Layout.topMargin: Tokens.padding.small
                         Layout.bottomMargin: Tokens.padding.small
                         spacing: Tokens.spacing.extraSmall
 
@@ -153,29 +262,6 @@ Scope {
 
                         Item {
                             Layout.fillWidth: true
-                        }
-
-                        MaterialIcon {
-                            id: closeBtn
-                            Layout.alignment: Qt.AlignVCenter
-                            text: "close"
-                            color: closeLayer.containsMouse ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
-                            scale: closeLayer.pressed ? 0.9 : 1
-
-                            Behavior on scale {
-                                Anim {
-                                    type: closeLayer.pressed ? Anim.FastSpatial : Anim.Emphasized
-                                }
-                            }
-
-                            StateLayer {
-                                id: closeLayer
-                                anchors.centerIn: parent
-                                implicitWidth: parent.implicitHeight + Tokens.padding.medium
-                                implicitHeight: implicitWidth
-                                radius: Tokens.rounding.full
-                                onClicked: Security.panelOpen = false
-                            }
                         }
                     }
 
@@ -196,6 +282,8 @@ Scope {
 
                         source: {
                             switch (Security.tab) {
+                            case "protection":
+                                return "ProtectionTab.qml";
                             case "firewall":
                                 return "FirewallTab.qml";
                             case "http":
@@ -203,7 +291,7 @@ Scope {
                             case "startup":
                                 return "StartupTab.qml";
                             default:
-                                return "ProtectionTab.qml";
+                                return "OverviewTab.qml";
                             }
                         }
 
@@ -231,7 +319,7 @@ Scope {
 
         signal clicked
 
-        implicitWidth: tbRow.implicitWidth + Tokens.padding.large * 2
+        implicitWidth: tbRow.implicitWidth + Tokens.padding.medium * 2
         implicitHeight: tbRow.implicitHeight + Tokens.padding.medium * 2
         radius: Tokens.rounding.full
         color: active ? Colours.palette.m3secondaryContainer : "transparent"
@@ -273,11 +361,14 @@ Scope {
                 }
             }
 
+            // Label only on the active tab — icon-only otherwise keeps all
+            // five pills within the card width.
             StyledText {
                 anchors.verticalCenter: parent.verticalCenter
+                visible: tb.active
                 text: tb.label
-                color: tb.active ? Colours.palette.m3onSecondaryContainer : Colours.palette.m3onSurfaceVariant
-                font: Tokens.font.body.builders.small.weight(tb.active ? Font.Bold : Font.Medium).build()
+                color: Colours.palette.m3onSecondaryContainer
+                font: Tokens.font.body.builders.small.weight(Font.Bold).build()
             }
 
             StyledRect {
