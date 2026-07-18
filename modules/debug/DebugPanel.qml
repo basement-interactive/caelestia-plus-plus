@@ -335,13 +335,6 @@ Scope {
                     }
 
                     TextButton {
-                        text: qsTr("Cancel fix")
-                        type: TextButton.Tonal
-                        visible: SystemCheck.busyId !== ""
-                        onClicked: SystemCheck.cancelRunningFix()
-                    }
-
-                    TextButton {
                         text: qsTr("Rescan")
                         type: TextButton.Tonal
                         disabled: SystemCheck.scanning
@@ -491,11 +484,12 @@ Scope {
                 }
             }
 
-            // Fix confirmation: nothing a quick-fix button stages runs until
-            // the exact commands have been shown and confirmed here
+            // Fix card, three states: confirmation (exact commands before
+            // anything runs), live progress (every output line as it
+            // happens), and the final result with the full log
             Rectangle {
                 anchors.fill: parent
-                visible: SystemCheck.pendingFix !== null
+                visible: SystemCheck.pendingFix !== null || SystemCheck.busyId !== "" || SystemCheck.fixResult !== null
                 color: Qt.alpha(Colours.palette.m3scrim, 0.5)
 
                 MouseArea {
@@ -528,14 +522,15 @@ Scope {
 
                         StyledText {
                             Layout.fillWidth: true
-                            text: SystemCheck.pendingFix?.title ?? ""
-                            color: Colours.palette.m3onSurface
+                            text: SystemCheck.pendingFix?.title ?? (SystemCheck.busyId !== "" ? qsTr("Running fix — live output") : SystemCheck.fixResult?.success ? qsTr("Fix finished") : qsTr("Fix failed — the log shows where it stopped"))
+                            color: SystemCheck.fixResult && !SystemCheck.fixResult.success ? "#ff5c5c" : Colours.palette.m3onSurface
                             font: Tokens.font.body.builders.large.weight(Font.Bold).build()
                             wrapMode: Text.WordWrap
                         }
 
                         StyledText {
                             Layout.fillWidth: true
+                            visible: SystemCheck.pendingFix !== null
                             text: SystemCheck.pendingFix?.summary ?? ""
                             color: Colours.palette.m3onSurfaceVariant
                             font: Tokens.font.body.medium
@@ -544,6 +539,7 @@ Scope {
 
                         StyledRect {
                             Layout.fillWidth: true
+                            visible: SystemCheck.pendingFix !== null
                             implicitHeight: cmdList.implicitHeight + Tokens.padding.medium * 2
                             radius: Tokens.rounding.small
                             color: Colours.palette.m3surface
@@ -573,9 +569,52 @@ Scope {
                             }
                         }
 
+                        // Live output while the fix runs, full log afterwards
+                        StyledClippingRect {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 240
+                            visible: SystemCheck.pendingFix === null
+                            radius: Tokens.rounding.small
+                            color: Colours.palette.m3surface
+
+                            StyledListView {
+                                id: fixLogView
+
+                                anchors.fill: parent
+                                anchors.margins: Tokens.padding.medium
+                                clip: true
+                                model: SystemCheck.fixLog
+                                spacing: 1
+
+                                onCountChanged: Qt.callLater(() => fixLogView.positionViewAtEnd())
+
+                                StyledScrollBar.vertical: StyledScrollBar {
+                                    flickable: fixLogView
+                                }
+
+                                delegate: StyledText {
+                                    required property string line
+
+                                    width: ListView.view.width
+                                    text: line
+                                    color: line.startsWith("FAIL") ? "#ff5c5c" : line.startsWith("WARN") ? "#ffc233" : line.startsWith("OK") ? "#4bd97b" : line.startsWith("==>") ? Colours.palette.m3primary : Colours.palette.m3onSurface
+                                    font: Tokens.font.mono.small
+                                    wrapMode: Text.WrapAnywhere
+                                }
+
+                                StyledText {
+                                    anchors.centerIn: parent
+                                    visible: fixLogView.count === 0
+                                    text: qsTr("Waiting for the password prompt…")
+                                    color: Colours.palette.m3outline
+                                    font: Tokens.font.body.medium
+                                }
+                            }
+                        }
+
                         StyledText {
                             Layout.fillWidth: true
-                            visible: (SystemCheck.pendingFix?.exec?.[0] ?? "") === "pkexec"
+                            visible: SystemCheck.pendingFix !== null && (SystemCheck.pendingFix?.exec?.[0] ?? "") === "pkexec"
                             text: qsTr("Runs as root — pkexec will ask for your password.")
                             color: "#ffc233"
                             font: Tokens.font.body.small
@@ -584,7 +623,7 @@ Scope {
 
                         StyledText {
                             Layout.fillWidth: true
-                            visible: (SystemCheck.pendingFix?.exec?.[0] ?? "") === "pkexec" && SystemCheck.polkitAgentMissing
+                            visible: SystemCheck.pendingFix !== null && (SystemCheck.pendingFix?.exec?.[0] ?? "") === "pkexec" && SystemCheck.polkitAgentMissing
                             text: qsTr("No polkit agent is running — the password prompt cannot appear and this fix would hang. Fix the polkit agent finding first.")
                             color: "#ff5c5c"
                             font: Tokens.font.body.small
@@ -600,14 +639,29 @@ Scope {
                             }
 
                             TextButton {
+                                visible: SystemCheck.pendingFix !== null
                                 text: qsTr("Cancel")
                                 type: TextButton.Text
                                 onClicked: SystemCheck.cancelPendingFix()
                             }
 
                             TextButton {
+                                visible: SystemCheck.pendingFix !== null
                                 text: qsTr("Confirm & run")
                                 onClicked: SystemCheck.confirmPendingFix()
+                            }
+
+                            TextButton {
+                                visible: SystemCheck.busyId !== ""
+                                text: qsTr("Cancel fix")
+                                type: TextButton.Tonal
+                                onClicked: SystemCheck.cancelRunningFix()
+                            }
+
+                            TextButton {
+                                visible: SystemCheck.busyId === "" && SystemCheck.fixResult !== null
+                                text: qsTr("Close")
+                                onClicked: SystemCheck.dismissFixResult()
                             }
                         }
                     }

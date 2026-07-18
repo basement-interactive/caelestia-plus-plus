@@ -40,6 +40,17 @@ Singleton {
     // Staged fix awaiting user confirmation: {id, title, summary, commands, exec, kind}
     property var pendingFix: null
 
+    // Live output of the running (or just finished) fix, streamed line by
+    // line into the fix card so "Working" is never a black box
+    readonly property ListModel fixLog: ListModel {}
+    // null while idle/running; {success, code} once the fix ends
+    property var fixResult: null
+
+    function dismissFixResult(): void {
+        fixResult = null;
+        fixLog.clear();
+    }
+
     // A root fix cannot even show its password prompt without an agent;
     // the confirmation cards warn on this instead of hanging silently
     readonly property bool polkitAgentMissing: results.some(r => r.id === "polkit-agent" && r.status === "fail")
@@ -167,6 +178,8 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
             ShellUpdates.update();
             return;
         }
+        fixLog.clear();
+        fixResult = null;
         busyId = fix.id;
         fixProc.command = fix.exec;
         fixProc.running = true;
@@ -246,7 +259,7 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
             const state = qsTr("unit state: %1 / %2").arg(unitEnabled || "?").arg(flags.ppdunit?.[1] ?? "?");
             const cause = unitMissing ? qsTr("service unit not found — the powerprofilesctl tool is present but the daemon package half is not; dbus activation times out with NoReply") : unitMasked ? qsTr("unit is masked, usually by another power tool — dbus activation times out with NoReply") : pmConflicts ? qsTr("likely blocked by %1 (see the conflict finding)").arg(pmConflicts) : qsTr("the daemon behind power profile switching is not active");
             push("ppd-service", active ? qsTr("power-profiles-daemon running") : qsTr("power-profiles-daemon not running"), active ? qsTr("The daemon behind power profile switching") : `${cause} — ${state}`, active ? "ok" : "warn", active ? null : {
-                fix: unitMissing ? Object.assign({label: qsTr("Install"), pkg: "power-profiles-daemon"}, _rootFix(qsTr("Reinstalls the power-profiles-daemon package (restores its missing service unit), then enables and starts it. Reload the shell afterwards so it reconnects to the daemon."), ["pacman -S --noconfirm power-profiles-daemon", "systemctl enable --now power-profiles-daemon"])) : Object.assign({label: qsTr("Enable")}, _rootFix(qsTr("Unmasks (in case another power tool masked it), enables and starts the power-profiles-daemon system service. Reload the shell afterwards so it reconnects to the daemon."), ["systemctl unmask power-profiles-daemon", "systemctl enable --now power-profiles-daemon"]))
+                fix: Object.assign({label: qsTr("Repair")}, _rootFix(qsTr("Runs a staged repair that diagnoses as it goes and only applies what the diagnosis calls for: installs/reinstalls the package if it or its unit is missing, unmasks the unit, stops and DISABLES conflicting power daemons it finds (tlp, tuned, tuned-ppd, auto-cpufreq, laptop-mode — they cause exactly this failure), then starts the service and verifies it answers on D-Bus. On failure it prints the daemon's own journal. Every step streams into this window; reload the shell at the end so it reconnects."), [`bash '${Quickshell.shellDir}/system/repair/power-profiles.sh'`]))
             });
         }
 
@@ -400,18 +413,31 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
         id: fixProc
 
         stdout: SplitParser {
-            onRead: data => console.info("systemcheck fix:", data)
+            onRead: data => {
+                console.info("systemcheck fix:", data);
+                root.fixLog.append({line: data});
+            }
+        }
+        stderr: SplitParser {
+            onRead: data => {
+                console.warn("systemcheck fix:", data);
+                root.fixLog.append({line: data});
+            }
         }
         onExited: code => {
             root.busyId = "";
             watchdog.stop();
             if (root._fixCancelled) {
                 root._fixCancelled = false;
+                root.fixLog.append({line: qsTr("— cancelled by user —")});
+                root.fixResult = {success: false, code: -1};
                 Toaster.toast(qsTr("Fix cancelled"), qsTr("Nothing further was changed"), "block");
             } else if (code === 0) {
+                root.fixResult = {success: true, code: 0};
                 Toaster.toast(qsTr("Fix applied"), qsTr("Rescanning to verify"), "task_alt");
             } else {
-                Toaster.toast(qsTr("Fix did not complete"), code === 126 || code === 127 ? qsTr("Authentication was dismissed or no polkit agent answered") : qsTr("Exited with code %1 — details in the debug console").arg(code), "warning");
+                root.fixResult = {success: false, code: code};
+                Toaster.toast(qsTr("Fix did not complete"), code === 126 || code === 127 ? qsTr("Authentication was dismissed or no polkit agent answered") : qsTr("Exited with code %1 — the log shows where it stopped").arg(code), "warning");
             }
             root.scan();
         }

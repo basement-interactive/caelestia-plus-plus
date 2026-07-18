@@ -315,6 +315,9 @@ Scope {
                             onClicked: {
                                 SystemCheck.confirmPendingFix();
                                 SystemCheck.dismissPrompt();
+                                // Live progress renders in the debug window
+                                DebugConsole.panelTab = "scan";
+                                DebugConsole.open = true;
                             }
                         }
                     }
