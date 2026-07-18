@@ -154,10 +154,12 @@ Singleton {
         function toggle(): void {
             root.open = !root.open;
         }
-        function show(): void {
+        // "show" is unusable as an IPC function name: it collides with the
+        // CLI's `ipc show` subcommand and prints target info instead
+        function openPanel(): void {
             root.open = true;
         }
-        function hide(): void {
+        function closePanel(): void {
             root.open = false;
         }
     }
