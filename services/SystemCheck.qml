@@ -45,6 +45,10 @@ Singleton {
     readonly property ListModel fixLog: ListModel {}
     // null while idle/running; {success, code} once the fix ends
     property var fixResult: null
+    // Whether the currently running fix goes through pkexec — the progress
+    // card words its waiting state around this (no password prompt promise
+    // for fixes that never ask for one)
+    property bool runningFixRoot: false
 
     function dismissFixResult(): void {
         fixResult = null;
@@ -144,6 +148,7 @@ Singleton {
         }
         fixLog.clear();
         fixResult = null;
+        runningFixRoot = fix.root ?? false;
         busyId = fix.id;
         fixProc.environment = fix.env ? {CAELESTIA_FIX: fix.env} : {};
         fixProc.command = fix.exec;

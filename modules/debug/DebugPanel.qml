@@ -605,7 +605,7 @@ Scope {
                                 StyledText {
                                     anchors.centerIn: parent
                                     visible: fixLogView.count === 0
-                                    text: qsTr("Waiting for the password prompt…")
+                                    text: SystemCheck.runningFixRoot ? qsTr("Waiting for the password prompt…") : qsTr("Starting…")
                                     color: Colours.palette.m3outline
                                     font: Tokens.font.body.medium
                                 }
