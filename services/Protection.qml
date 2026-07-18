@@ -14,7 +14,7 @@ Singleton {
     id: root
 
     readonly property string sockPath: "/run/redguard/ui.sock"
-    readonly property bool connected: sock.connected
+    readonly property bool connected: sockLoader.item?.connected ?? false
 
     // Frozen processes waiting on a verdict right now (drives the prompt).
     property var pending: []
@@ -55,8 +55,8 @@ Singleton {
     }
 
     function _send(obj: var): void {
-        if (sock.connected)
-            sock.write(JSON.stringify(obj) + "\n");
+        if (sockLoader.item?.connected)
+            sockLoader.item.write(JSON.stringify(obj) + "\n");
     }
 
     // action: "allow" | "block" | "once". remember only meaningful for
@@ -122,32 +122,48 @@ Singleton {
         // the log tab can surface them later, no action needed here.
     }
 
-    Socket {
-        id: sock
+    // A Quickshell Socket does not reliably re-attempt after a failed connect
+    // (toggling `connected` on the existing object is a no-op), so a daemon
+    // that starts AFTER the shell — e.g. installing Protection while it runs —
+    // would never attach. Instead the socket lives in a Loader that is rebuilt
+    // from scratch every couple of seconds until the fresh QLocalSocket
+    // connects; once connected the reconnect timer stops.
+    Loader {
+        id: sockLoader
 
-        path: root.sockPath
-        connected: true
+        active: true
+        sourceComponent: Component {
+            Socket {
+                path: root.sockPath
+                connected: true
 
-        parser: SplitParser {
-            splitMarker: "\n"
-            onRead: line => root._handle(line)
-        }
+                parser: SplitParser {
+                    splitMarker: "\n"
+                    onRead: line => root._handle(line)
+                }
 
-        onConnectionStateChanged: {
-            if (!connected)
-                root.pending = [];
+                onConnectionStateChanged: {
+                    if (!connected)
+                        root.pending = [];
+                }
+            }
         }
     }
 
-    // Reconnect loop: the daemon may start after the shell, restart, etc.
     Timer {
-        interval: 3000
-        running: !sock.connected
+        interval: 2000
+        running: !root.connected
         repeat: true
         onTriggered: {
-            sock.connected = false;
-            sock.connected = true;
+            sockLoader.active = false;
+            reconnectKick.restart();
         }
+    }
+
+    Timer {
+        id: reconnectKick
+        interval: 50
+        onTriggered: sockLoader.active = true
     }
 
     IpcHandler {

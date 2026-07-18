@@ -61,7 +61,13 @@ ColumnLayout {
             Layout.alignment: Qt.AlignLeft
             text: Protection.installing ? qsTr("Installing…") : qsTr("Enable Protection")
             disabled: Protection.installing
-            onClicked: Protection.install()
+            // Close the center first: it's an overlay layer and would sit on
+            // top of the polkit password prompt. Progress shows via toasts, and
+            // the shield/overview attach live once the daemon starts.
+            onClicked: {
+                Protection.install();
+                Security.panelOpen = false;
+            }
         }
     }
 
