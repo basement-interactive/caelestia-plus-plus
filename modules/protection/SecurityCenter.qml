@@ -24,7 +24,7 @@ Scope {
         {id: "overview", label: qsTr("Overview"), icon: "space_dashboard", badge: 0},
         {id: "protection", label: qsTr("Protection"), icon: "security", badge: Protection.pendingCount},
         {id: "firewall", label: qsTr("Firewall"), icon: "gpp_good", badge: Firewall.pendingCount},
-        {id: "http", label: qsTr("HTTP"), icon: "travel_explore", badge: 0},
+        {id: "http", label: qsTr("HTTP"), icon: "travel_explore", badge: Http.heldCount},
         {id: "startup", label: qsTr("Startup"), icon: "rocket_launch", badge: 0}
     ]
 

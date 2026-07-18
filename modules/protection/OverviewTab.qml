@@ -61,9 +61,9 @@ Item {
                 Layout.fillWidth: true
                 icon: "travel_explore"
                 title: qsTr("HTTP Debugger")
-                status: qsTr("Soon")
-                statusColour: Colours.palette.m3outline
-                detail: qsTr("Inspect, intercept and modify HTTP/HTTPS — coming next")
+                status: !Http.installed ? qsTr("Not set up") : Http.running ? qsTr("Capturing") : qsTr("Off")
+                statusColour: !Http.installed ? root.warn : Http.running ? root.good : Colours.palette.m3outline
+                detail: !Http.installed ? qsTr("Install to inspect, resend, intercept and modify traffic") : Http.running ? qsTr("Proxy on 127.0.0.1:%1 · %2 flows").arg(Http.port).arg(Http.flows.length) : qsTr("Inspect, resend, intercept and modify HTTP/HTTPS")
                 onClicked: Security.tab = "http"
             }
 
