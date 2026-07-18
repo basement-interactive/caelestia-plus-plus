@@ -12,6 +12,7 @@ import "modules/easteregg"
 import "modules/lock"
 import "modules/firewall"
 import "modules/features"
+import "modules/debug"
 import QtQuick
 import Quickshell
 import qs.services
@@ -38,6 +39,7 @@ ShellRoot {
     FirewallPrompt {}
     FirewallPanel {}
     FeaturesMenu {}
+    DebugPanel {}
 
     ConfigToasts {}
     Shortcuts {}

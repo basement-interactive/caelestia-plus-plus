@@ -27,6 +27,17 @@ StyledRect {
         id: hover
     }
 
+    // Ten rapid clicks on the clock pill open the hidden debug console;
+    // TapHandler's tapCount already tracks successive same-spot taps, so a
+    // slow click or a stray drag resets the sequence on its own.
+    TapHandler {
+        acceptedButtons: Qt.LeftButton
+        onTapped: {
+            if (tapCount >= 10)
+                DebugConsole.open = true;
+        }
+    }
+
     Behavior on scale {
         Anim {
             type: Anim.FastSpatial
