@@ -189,7 +189,12 @@ Scope {
                         IconButton {
                             icon: "content_copy"
                             type: IconButton.Tonal
-                            onClicked: DebugConsole.copyVisible()
+                            onClicked: {
+                                if (logText.selectedText)
+                                    logText.copy();
+                                else
+                                    DebugConsole.copyVisible();
+                            }
                         }
 
                         IconButton {
@@ -211,8 +216,11 @@ Scope {
                         radius: Tokens.rounding.small
                         color: Colours.palette.m3surface
 
-                        StyledListView {
-                            id: list
+                        // Non-interactive so mouse drags select text in the
+                        // TextEdit instead of flicking; scrolling is wheel +
+                        // scrollbar only
+                        Flickable {
+                            id: logView
 
                             // Follow the tail unless the user scrolled up
                             property bool stick: true
@@ -220,84 +228,86 @@ Scope {
                             anchors.fill: parent
                             anchors.margins: Tokens.padding.medium
                             clip: true
-                            spacing: Tokens.spacing.extraSmall / 2
-                            model: DebugConsole.lines
+                            interactive: false
+                            contentWidth: width
+                            contentHeight: logText.implicitHeight
 
-                            onCountChanged: {
-                                if (stick)
-                                    Qt.callLater(() => list.positionViewAtEnd());
+                            function scrollBy(dy: real): void {
+                                contentY = Math.max(0, Math.min(Math.max(0, contentHeight - height), contentY - dy));
+                                stick = contentY >= contentHeight - height - 4;
                             }
-                            onMovementEnded: stick = atYEnd
-                            onFlickEnded: stick = atYEnd
+
+                            onContentHeightChanged: {
+                                if (stick)
+                                    contentY = Math.max(0, contentHeight - height);
+                            }
+
+                            WheelHandler {
+                                target: null
+                                onWheel: event => logView.scrollBy(event.angleDelta.y)
+                            }
 
                             StyledScrollBar.vertical: StyledScrollBar {
-                                flickable: list
+                                flickable: logView
                             }
 
-                            delegate: RowLayout {
-                                id: line
+                            TextEdit {
+                                id: logText
 
-                                required property string time
-                                required property string level
-                                required property string category
-                                required property string message
+                                function esc(s: string): string {
+                                    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                                }
 
-                                readonly property color levelColour: {
-                                    switch (level) {
-                                    case "error":
-                                        return Colours.palette.m3error;
-                                    case "warn":
-                                        return Colours.palette.m3tertiary;
-                                    case "debug":
-                                        return Colours.palette.m3outline;
-                                    default:
-                                        return Colours.palette.m3onSurfaceVariant;
+                                function fmt(entry: var): string {
+                                    const levelColour = {
+                                        error: Colours.palette.m3error,
+                                        warn: Colours.palette.m3tertiary,
+                                        debug: Colours.palette.m3outline
+                                    }[entry.level] ?? Colours.palette.m3onSurfaceVariant;
+                                    const messageColour = entry.level === "error" ? Colours.palette.m3error : Colours.palette.m3onSurface;
+                                    return `<span style="color:${Colours.palette.m3outline}">${entry.time}</span> <span style="color:${levelColour}">${entry.level.toUpperCase()}</span> <span style="color:${Colours.palette.m3secondary}">${esc(entry.category)}</span> <span style="color:${messageColour}">${esc(entry.message)}</span>`;
+                                }
+
+                                function rebuild(): void {
+                                    const rows = [];
+                                    for (let i = 0; i < DebugConsole.lines.count; i++)
+                                        rows.push(fmt(DebugConsole.lines.get(i)));
+                                    text = rows.join("<br>");
+                                }
+
+                                width: logView.width
+                                textFormat: TextEdit.RichText
+                                wrapMode: TextEdit.Wrap
+                                readOnly: true
+                                selectByMouse: true
+                                persistentSelection: true
+                                color: Colours.palette.m3onSurface
+                                selectionColor: Colours.palette.m3primary
+                                selectedTextColor: Colours.palette.m3onPrimary
+                                font: Tokens.font.mono.small
+
+                                Component.onCompleted: rebuild()
+
+                                Connections {
+                                    target: DebugConsole
+
+                                    function onLineAppended(entry: var): void {
+                                        logText.append(logText.fmt(entry));
+                                    }
+
+                                    function onViewReset(): void {
+                                        logText.rebuild();
                                     }
                                 }
-
-                                width: ListView.view.width
-                                spacing: Tokens.spacing.small
-
-                                StyledText {
-                                    Layout.alignment: Qt.AlignTop
-                                    text: line.time
-                                    color: Colours.palette.m3outline
-                                    font: Tokens.font.mono.small
-                                }
-
-                                StyledText {
-                                    Layout.alignment: Qt.AlignTop
-                                    Layout.preferredWidth: 48
-                                    text: line.level.toUpperCase()
-                                    color: line.levelColour
-                                    font: Tokens.font.mono.builders.small.weight(Font.Bold).build()
-                                }
-
-                                StyledText {
-                                    Layout.alignment: Qt.AlignTop
-                                    Layout.maximumWidth: 220
-                                    text: line.category
-                                    elide: Text.ElideMiddle
-                                    color: Colours.palette.m3secondary
-                                    font: Tokens.font.mono.small
-                                }
-
-                                StyledText {
-                                    Layout.fillWidth: true
-                                    text: line.message
-                                    wrapMode: Text.WrapAnywhere
-                                    color: line.level === "error" ? Colours.palette.m3error : Colours.palette.m3onSurface
-                                    font: Tokens.font.mono.small
-                                }
                             }
+                        }
 
-                            StyledText {
-                                anchors.centerIn: parent
-                                visible: list.count === 0
-                                text: DebugConsole.paused ? qsTr("Paused") : qsTr("Waiting for log output…")
-                                color: Colours.palette.m3outline
-                                font: Tokens.font.body.medium
-                            }
+                        StyledText {
+                            anchors.centerIn: parent
+                            visible: DebugConsole.lines.count === 0
+                            text: DebugConsole.paused ? qsTr("Paused") : qsTr("Waiting for log output…")
+                            color: Colours.palette.m3outline
+                            font: Tokens.font.body.medium
                         }
                     }
 

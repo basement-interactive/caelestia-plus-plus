@@ -42,11 +42,17 @@ Singleton {
     onLevelFilterChanged: _refill()
     onQueryChanged: _refill()
 
+    // The panel renders `lines` as one selectable text document, so it needs
+    // to know about single appends (cheap) vs anything else (full rebuild)
+    signal lineAppended(entry: var)
+    signal viewReset
+
     function clear(): void {
         buffer.length = 0;
         lines.clear();
         warnCount = 0;
         errorCount = 0;
+        viewReset();
     }
 
     function copyVisible(): void {
@@ -75,6 +81,7 @@ Singleton {
         for (const entry of buffer)
             if (_matches(entry))
                 lines.append(entry);
+        viewReset();
     }
 
     function _append(raw: string): void {
@@ -99,12 +106,18 @@ Singleton {
 
         buffer.push(entry);
         if (buffer.length > maxLines)
-            buffer.shift();
+            buffer.splice(0, 200);
 
         if (_matches(entry)) {
             lines.append(entry);
-            if (lines.count > maxLines)
-                lines.remove(0);
+            // Trim in chunks: dropping one line per append would force the
+            // panel to rebuild its text document on every overflowing line
+            if (lines.count > maxLines) {
+                lines.remove(0, 200);
+                viewReset();
+            } else {
+                lineAppended(entry);
+            }
         }
     }
 
