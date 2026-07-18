@@ -100,20 +100,14 @@ Scope {
             border.width: 1
             border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
+            // Clean fade: card and scrim fade together on the same effects
+            // curve, with only a gentle scale — no vertical drop, so a big
+            // centered panel doesn't read as "falling in".
             opacity: root.open ? 1 : 0
-            scale: root.open ? 1 : 0.94
+            scale: root.open ? 1 : 0.98
             focus: root.open
 
             Keys.onEscapePressed: Security.panelOpen = false
-
-            transform: Translate {
-                y: root.open ? 0 : -30
-                Behavior on y {
-                    Anim {
-                        type: Anim.Emphasized
-                    }
-                }
-            }
 
             Behavior on opacity {
                 Anim {
@@ -123,7 +117,7 @@ Scope {
 
             Behavior on scale {
                 Anim {
-                    type: Anim.Emphasized
+                    type: Anim.DefaultEffects
                 }
             }
 
