@@ -331,7 +331,7 @@ Scope {
                         type: TextButton.Tonal
                         visible: SystemCheck.missingPackages.length > 0
                         disabled: SystemCheck.busyId !== ""
-                        onClicked: SystemCheck.installAllMissing()
+                        onClicked: SystemCheck.requestInstallAll()
                     }
 
                     TextButton {
@@ -426,11 +426,11 @@ Scope {
 
                             TextButton {
                                 Layout.alignment: Qt.AlignVCenter
-                                visible: checkRow.modelData.fixLabel !== ""
-                                text: SystemCheck.busyId === checkRow.modelData.id ? qsTr("Working…") : checkRow.modelData.fixLabel
+                                visible: !!checkRow.modelData.fix
+                                text: SystemCheck.busyId === checkRow.modelData.id ? qsTr("Working…") : (checkRow.modelData.fix?.label ?? "")
                                 type: TextButton.Tonal
                                 disabled: SystemCheck.busyId !== ""
-                                onClicked: SystemCheck.runFix(checkRow.modelData.id)
+                                onClicked: SystemCheck.requestFix(checkRow.modelData.id)
                             }
                         }
 
@@ -480,6 +480,120 @@ Scope {
                         text: qsTr("qs ipc call debug toggle")
                         color: Colours.palette.m3outline
                         font: Tokens.font.mono.small
+                    }
+                }
+            }
+
+            // Fix confirmation: nothing a quick-fix button stages runs until
+            // the exact commands have been shown and confirmed here
+            Rectangle {
+                anchors.fill: parent
+                visible: SystemCheck.pendingFix !== null
+                color: Qt.alpha(Colours.palette.m3scrim, 0.5)
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: SystemCheck.cancelPendingFix()
+                }
+
+                StyledRect {
+                    anchors.centerIn: parent
+                    width: Math.min(640, parent.width - Tokens.padding.large * 4)
+                    implicitHeight: confirmContent.implicitHeight + Tokens.padding.large * 2
+
+                    radius: Tokens.rounding.large
+                    color: Colours.palette.m3surfaceContainerHigh
+                    border.width: 1
+                    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+                    MouseArea {
+                        anchors.fill: parent
+                    }
+
+                    ColumnLayout {
+                        id: confirmContent
+
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.margins: Tokens.padding.large
+                        spacing: Tokens.spacing.medium
+
+                        StyledText {
+                            Layout.fillWidth: true
+                            text: SystemCheck.pendingFix?.title ?? ""
+                            color: Colours.palette.m3onSurface
+                            font: Tokens.font.body.builders.large.weight(Font.Bold).build()
+                            wrapMode: Text.WordWrap
+                        }
+
+                        StyledText {
+                            Layout.fillWidth: true
+                            text: SystemCheck.pendingFix?.summary ?? ""
+                            color: Colours.palette.m3onSurfaceVariant
+                            font: Tokens.font.body.medium
+                            wrapMode: Text.WordWrap
+                        }
+
+                        StyledRect {
+                            Layout.fillWidth: true
+                            implicitHeight: cmdList.implicitHeight + Tokens.padding.medium * 2
+                            radius: Tokens.rounding.small
+                            color: Colours.palette.m3surface
+
+                            Column {
+                                id: cmdList
+
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.margins: Tokens.padding.medium
+                                spacing: Tokens.spacing.extraSmall
+
+                                Repeater {
+                                    model: SystemCheck.pendingFix?.commands ?? []
+
+                                    StyledText {
+                                        required property string modelData
+
+                                        width: parent.width
+                                        text: modelData
+                                        color: Colours.palette.m3onSurface
+                                        font: Tokens.font.mono.small
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+                                }
+                            }
+                        }
+
+                        StyledText {
+                            Layout.fillWidth: true
+                            visible: (SystemCheck.pendingFix?.exec?.[0] ?? "") === "pkexec"
+                            text: qsTr("Runs as root — pkexec will ask for your password.")
+                            color: "#ffc233"
+                            font: Tokens.font.body.small
+                            wrapMode: Text.WordWrap
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Tokens.spacing.small
+
+                            Item {
+                                Layout.fillWidth: true
+                            }
+
+                            TextButton {
+                                text: qsTr("Cancel")
+                                type: TextButton.Text
+                                onClicked: SystemCheck.cancelPendingFix()
+                            }
+
+                            TextButton {
+                                text: qsTr("Confirm & run")
+                                onClicked: SystemCheck.confirmPendingFix()
+                            }
+                        }
                     }
                 }
             }

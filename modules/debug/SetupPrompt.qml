@@ -149,6 +149,7 @@ Scope {
                         Layout.leftMargin: Tokens.padding.extraLargeIncreased
                         Layout.rightMargin: Tokens.padding.extraLargeIncreased
                         spacing: Tokens.spacing.small
+                        visible: SystemCheck.pendingFix === null
 
                         Repeater {
                             model: ScriptModel {
@@ -191,11 +192,70 @@ Scope {
                         }
                     }
 
+                    // Confirmation view: replaces the item list once Fix now
+                    // is pressed, showing the exact commands before anything
+                    // runs
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Tokens.padding.extraLargeIncreased
+                        Layout.rightMargin: Tokens.padding.extraLargeIncreased
+                        spacing: Tokens.spacing.small
+                        visible: SystemCheck.pendingFix !== null
+
+                        StyledText {
+                            Layout.fillWidth: true
+                            text: SystemCheck.pendingFix?.summary ?? ""
+                            color: Colours.palette.m3onSurfaceVariant
+                            font: Tokens.font.body.medium
+                            wrapMode: Text.WordWrap
+                        }
+
+                        StyledRect {
+                            Layout.fillWidth: true
+                            implicitHeight: promptCmds.implicitHeight + Tokens.padding.medium * 2
+                            radius: Tokens.rounding.small
+                            color: Colours.palette.m3surface
+
+                            Column {
+                                id: promptCmds
+
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.margins: Tokens.padding.medium
+                                spacing: Tokens.spacing.extraSmall
+
+                                Repeater {
+                                    model: SystemCheck.pendingFix?.commands ?? []
+
+                                    StyledText {
+                                        required property string modelData
+
+                                        width: parent.width
+                                        text: modelData
+                                        color: Colours.palette.m3onSurface
+                                        font: Tokens.font.mono.small
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+                                }
+                            }
+                        }
+
+                        StyledText {
+                            Layout.fillWidth: true
+                            text: qsTr("Runs as root — pkexec will ask for your password.")
+                            color: "#ffc233"
+                            font: Tokens.font.body.small
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.margins: Tokens.padding.extraLargeIncreased
                         Layout.topMargin: Tokens.padding.small
                         spacing: Tokens.spacing.small
+                        visible: SystemCheck.pendingFix === null
 
                         TextButton {
                             text: qsTr("Later")
@@ -220,8 +280,31 @@ Scope {
                         TextButton {
                             text: SystemCheck.busyId === "all" ? qsTr("Fixing…") : qsTr("Fix now")
                             disabled: SystemCheck.busyId !== ""
+                            onClicked: SystemCheck.requestFixAll()
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.margins: Tokens.padding.extraLargeIncreased
+                        Layout.topMargin: Tokens.padding.small
+                        spacing: Tokens.spacing.small
+                        visible: SystemCheck.pendingFix !== null
+
+                        TextButton {
+                            text: qsTr("Back")
+                            type: TextButton.Text
+                            onClicked: SystemCheck.cancelPendingFix()
+                        }
+
+                        Item {
+                            Layout.fillWidth: true
+                        }
+
+                        TextButton {
+                            text: qsTr("Confirm & fix")
                             onClicked: {
-                                SystemCheck.fixAllPrompted();
+                                SystemCheck.confirmPendingFix();
                                 SystemCheck.dismissPrompt();
                             }
                         }
