@@ -614,7 +614,7 @@ Scope {
 
                         StyledText {
                             Layout.fillWidth: true
-                            visible: SystemCheck.pendingFix !== null && (SystemCheck.pendingFix?.exec?.[0] ?? "") === "pkexec"
+                            visible: SystemCheck.pendingFix !== null && (SystemCheck.pendingFix?.root ?? false)
                             text: qsTr("Runs as root — pkexec will ask for your password.")
                             color: "#ffc233"
                             font: Tokens.font.body.small
@@ -623,7 +623,7 @@ Scope {
 
                         StyledText {
                             Layout.fillWidth: true
-                            visible: SystemCheck.pendingFix !== null && (SystemCheck.pendingFix?.exec?.[0] ?? "") === "pkexec" && SystemCheck.polkitAgentMissing
+                            visible: SystemCheck.pendingFix !== null && (SystemCheck.pendingFix?.root ?? false) && SystemCheck.polkitAgentMissing
                             text: qsTr("No polkit agent is running — the password prompt cannot appear and this fix would hang. Fix the polkit agent finding first.")
                             color: "#ff5c5c"
                             font: Tokens.font.body.small

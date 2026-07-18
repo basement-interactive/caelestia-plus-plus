@@ -139,13 +139,10 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
         if (!missingPackages.length || busyId)
             return;
         const cmd = "pacman -S --needed --noconfirm " + missingPackages.join(" ");
-        pendingFix = {
+        pendingFix = Object.assign({
             id: "all",
-            title: qsTr("Install %1 missing packages").arg(missingPackages.length),
-            summary: qsTr("Installs the packages the shell needs through pacman, as root via pkexec. Nothing is removed or reconfigured."),
-            commands: [cmd],
-            exec: ["pkexec", "sh", "-c", cmd]
-        };
+            title: qsTr("Install %1 missing packages").arg(missingPackages.length)
+        }, _rootFix(qsTr("Installs the packages the shell needs through pacman, as root via pkexec. Nothing is removed or reconfigured."), [cmd]));
     }
 
     // Startup-prompt bundle: missing packages + outdated privileged halves,
@@ -160,13 +157,10 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
             commands.push(`bash '${Quickshell.shellDir}/system/${dir}/install.sh'`);
         if (!commands.length)
             return;
-        pendingFix = {
+        pendingFix = Object.assign({
             id: "all",
-            title: qsTr("Fix everything found"),
-            summary: qsTr("Installs missing packages and re-runs the installers of outdated privileged components (they overwrite their own files under /usr/local/bin and /etc/systemd/system, then restart their units). One password, everything runs as root via pkexec."),
-            commands: commands,
-            exec: ["pkexec", "sh", "-c", commands.join(" && ")]
-        };
+            title: qsTr("Fix everything found")
+        }, _rootFix(qsTr("Installs missing packages and re-runs the installers of outdated privileged components (they overwrite their own files under /usr/local/bin and /etc/systemd/system, then restart their units). One password, everything runs as root via pkexec."), commands));
     }
 
     function confirmPendingFix(): void {
@@ -181,6 +175,7 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
         fixLog.clear();
         fixResult = null;
         busyId = fix.id;
+        fixProc.environment = fix.env ? {CAELESTIA_FIX: fix.env} : {};
         fixProc.command = fix.exec;
         fixProc.running = true;
     }
@@ -211,8 +206,14 @@ echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 |
 
     // --- Row builders --------------------------------------------------------
 
+    // Root fixes run pkexec under a plain user-level sh wrapper on purpose:
+    // pkexec is setuid, so once it starts, this process cannot signal it —
+    // a direct pkexec child made "Cancel fix" a no-op. Killing the wrapper
+    // always works and unsticks the UI; a script already past auth keeps
+    // running root-side to completion (they are short and self-limiting).
+    // The command travels in $CAELESTIA_FIX so no quoting layer mangles it.
     function _rootFix(summary: string, commands: var): var {
-        return {summary: summary, commands: commands, exec: ["pkexec", "sh", "-c", commands.join(" && ")]};
+        return {summary: summary, commands: commands, root: true, exec: ["sh", "-c", `pkexec sh -c "$CAELESTIA_FIX"`], env: commands.join(" && ")};
     }
 
     function _userFix(summary: string, commands: var): var {

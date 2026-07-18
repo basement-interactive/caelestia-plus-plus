@@ -67,29 +67,51 @@ for c in tlp tuned tuned-ppd auto-cpufreq laptop-mode; do
     if systemctl is-active -q "$c.service" 2>/dev/null || systemctl is-enabled -q "$c.service" 2>/dev/null; then
         found_conflict=1
         step "$c.service is active/enabled — it blocks power-profiles-daemon; stopping and disabling it"
-        if systemctl disable --now "$c.service" 2>/dev/null; then
+        if timeout 20 systemctl disable --now "$c.service" 2>/dev/null; then
             ok "$c stopped and disabled (re-enable later with: systemctl enable --now $c)"
         else
-            warn "could not disable $c — continuing anyway"
+            warn "could not disable $c (or it took >20s) — continuing anyway"
         fi
     fi
 done
 [ "$found_conflict" = 0 ] && ok "none found"
 
-step "Enabling and starting power-profiles-daemon"
-systemctl enable --now power-profiles-daemon 2>&1 | sed 's/^/     /'
-tries=0
-until systemctl is-active -q power-profiles-daemon; do
-    tries=$((tries + 1))
-    if [ "$tries" -ge 10 ]; then
-        fail "service did not become active after 10s — this is what the daemon itself says:"
-        journalctl -u power-profiles-daemon -b --no-pager -n 15 2>/dev/null | sed 's/^/     /'
-        systemctl status power-profiles-daemon --no-pager -l 2>/dev/null | head -12 | sed 's/^/     /'
-        exit 1
+diagnose_failure() {
+    fail "$1 — this is what the daemon itself says:"
+    journalctl -u power-profiles-daemon -b --no-pager -n 15 2>/dev/null | sed 's/^/     /'
+    systemctl status power-profiles-daemon --no-pager -l 2>/dev/null | head -12 | sed 's/^/     /'
+    exit 1
+}
+
+step "Enabling power-profiles-daemon at boot"
+timeout 20 systemctl enable power-profiles-daemon 2>&1 | sed 's/^/     /'
+ok "enabled"
+
+# --no-block: a dbus-type unit that never claims its bus name makes a plain
+# `systemctl start` sit silently for the unit's whole start timeout (90s+),
+# which reads as the repair being stuck. Queue the job and poll instead, so
+# there is visible progress and an early exit the moment the unit fails.
+step "Starting power-profiles-daemon"
+timeout 10 systemctl start --no-block power-profiles-daemon 2>&1 | sed 's/^/     /'
+waited=0
+while [ "$waited" -lt 45 ]; do
+    if systemctl is-active -q power-profiles-daemon; then
+        ok "service is active (after ${waited}s)"
+        break
     fi
+    if systemctl is-failed -q power-profiles-daemon; then
+        diagnose_failure "service entered failed state after ${waited}s"
+    fi
+    [ $((waited % 5)) -eq 0 ] && [ "$waited" -gt 0 ] && echo "     still starting... (${waited}s)"
     sleep 1
+    waited=$((waited + 1))
 done
-ok "service is active"
+if ! systemctl is-active -q power-profiles-daemon; then
+    step "Start is hanging — cancelling the job to get the real error"
+    systemctl list-jobs --no-pager 2>/dev/null | sed 's/^/     /'
+    timeout 10 systemctl stop power-profiles-daemon 2>/dev/null
+    diagnose_failure "service neither started nor failed within 45s (D-Bus activation deadlock)"
+fi
 
 step "Verifying the daemon answers on D-Bus"
 if powerprofilesctl get >/dev/null 2>&1; then
