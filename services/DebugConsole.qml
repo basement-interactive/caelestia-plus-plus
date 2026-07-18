@@ -14,6 +14,7 @@ Singleton {
     id: root
 
     property bool open: false
+    property string panelTab: "console" // console | scan
     property bool paused: false
     property bool verbose: true
 

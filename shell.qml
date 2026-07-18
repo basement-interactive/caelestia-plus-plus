@@ -40,6 +40,7 @@ ShellRoot {
     FirewallPanel {}
     FeaturesMenu {}
     DebugPanel {}
+    SetupPrompt {}
 
     ConfigToasts {}
     Shortcuts {}

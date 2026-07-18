@@ -23,6 +23,8 @@ Scope {
         FloatingWindow {
             id: win
 
+            readonly property bool consoleTab: DebugConsole.panelTab === "console"
+
             color: Colours.palette.m3surfaceContainerLow
             title: qsTr("Caelestia debug console")
 
@@ -107,6 +109,34 @@ Scope {
                     Layout.fillWidth: true
                     spacing: Tokens.spacing.small
 
+                    TextButton {
+                        text: qsTr("Console")
+                        type: TextButton.Tonal
+                        checked: win.consoleTab
+                        onClicked: DebugConsole.panelTab = "console"
+                    }
+
+                    TextButton {
+                        text: SystemCheck.problemCount > 0 ? qsTr("System scan (%1)").arg(SystemCheck.problemCount) : qsTr("System scan")
+                        type: TextButton.Tonal
+                        checked: !win.consoleTab
+                        onClicked: {
+                            DebugConsole.panelTab = "scan";
+                            if (!SystemCheck.results.length)
+                                SystemCheck.scan();
+                        }
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Tokens.spacing.small
+                    visible: win.consoleTab
+
                     Repeater {
                         model: [
                             {id: "all", label: qsTr("All")},
@@ -168,6 +198,7 @@ Scope {
 
                 SearchBar {
                     Layout.fillWidth: true
+                    visible: win.consoleTab
                     placeholderText: qsTr("Filter by category or message")
                     onTextChanged: DebugConsole.query = text
                 }
@@ -175,6 +206,7 @@ Scope {
                 StyledClippingRect {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    visible: win.consoleTab
                     radius: Tokens.rounding.small
                     color: Colours.palette.m3surface
 
@@ -276,6 +308,137 @@ Scope {
                         text: DebugConsole.paused ? qsTr("Paused") : qsTr("Waiting for log output…")
                         color: Colours.palette.m3outline
                         font: Tokens.font.body.medium
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Tokens.spacing.small
+                    visible: !win.consoleTab
+
+                    StyledText {
+                        text: SystemCheck.scanning ? qsTr("Scanning…") : SystemCheck.lastScan ? (SystemCheck.problemCount > 0 ? qsTr("%1 issues found · scanned %2").arg(SystemCheck.problemCount).arg(SystemCheck.lastScan) : qsTr("All good · scanned %1").arg(SystemCheck.lastScan)) : qsTr("Not scanned yet")
+                        color: SystemCheck.problemCount > 0 ? "#ffc233" : Colours.palette.m3onSurfaceVariant
+                        font: Tokens.font.body.small
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                    }
+
+                    TextButton {
+                        text: SystemCheck.busyId === "all" ? qsTr("Installing…") : qsTr("Install all missing")
+                        type: TextButton.Tonal
+                        visible: SystemCheck.missingPackages.length > 0
+                        disabled: SystemCheck.busyId !== ""
+                        onClicked: SystemCheck.installAllMissing()
+                    }
+
+                    TextButton {
+                        text: qsTr("Rescan")
+                        type: TextButton.Tonal
+                        disabled: SystemCheck.scanning
+                        onClicked: SystemCheck.scan()
+                    }
+                }
+
+                StyledClippingRect {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: !win.consoleTab
+                    radius: Tokens.rounding.small
+                    color: Colours.palette.m3surface
+
+                    StyledListView {
+                        id: scanList
+
+                        anchors.fill: parent
+                        anchors.margins: Tokens.padding.medium
+                        clip: true
+                        spacing: Tokens.spacing.small
+
+                        model: ScriptModel {
+                            values: SystemCheck.results
+                        }
+
+                        StyledScrollBar.vertical: StyledScrollBar {
+                            flickable: scanList
+                        }
+
+                        delegate: RowLayout {
+                            id: checkRow
+
+                            required property var modelData
+
+                            readonly property color statusColour: {
+                                switch (modelData.status) {
+                                case "fail":
+                                    return "#ff5c5c";
+                                case "warn":
+                                    return "#ffc233";
+                                case "info":
+                                    return Colours.palette.m3outline;
+                                default:
+                                    return Colours.palette.m3primary;
+                                }
+                            }
+
+                            width: ListView.view.width
+                            spacing: Tokens.spacing.medium
+
+                            MaterialIcon {
+                                Layout.alignment: Qt.AlignTop
+                                text: {
+                                    switch (checkRow.modelData.status) {
+                                    case "fail":
+                                        return "error";
+                                    case "warn":
+                                        return "warning";
+                                    case "info":
+                                        return "info";
+                                    default:
+                                        return "check_circle";
+                                    }
+                                }
+                                fill: 1
+                                color: checkRow.statusColour
+                            }
+
+                            Column {
+                                Layout.fillWidth: true
+
+                                StyledText {
+                                    text: checkRow.modelData.name
+                                    color: Colours.palette.m3onSurface
+                                    font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
+                                }
+
+                                StyledText {
+                                    width: parent.width
+                                    text: checkRow.modelData.detail
+                                    color: Colours.palette.m3onSurfaceVariant
+                                    font: Tokens.font.body.small
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            TextButton {
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: checkRow.modelData.fixLabel !== ""
+                                text: SystemCheck.busyId === checkRow.modelData.id ? qsTr("Working…") : checkRow.modelData.fixLabel
+                                type: TextButton.Tonal
+                                disabled: SystemCheck.busyId !== ""
+                                onClicked: SystemCheck.runFix(checkRow.modelData.id)
+                            }
+                        }
+
+                        StyledText {
+                            anchors.centerIn: parent
+                            visible: scanList.count === 0
+                            text: SystemCheck.scanning ? qsTr("Scanning…") : qsTr("Press Rescan to check the system")
+                            color: Colours.palette.m3outline
+                            font: Tokens.font.body.medium
+                        }
                     }
                 }
 

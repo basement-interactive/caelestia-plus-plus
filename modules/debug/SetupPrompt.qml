@@ -1,0 +1,229 @@
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Layouts
+import Quickshell
+import Quickshell.Wayland
+import Caelestia.Config
+import qs.components
+import qs.components.containers
+import qs.components.controls
+import qs.services
+
+// Centered prompt shown once after startup when the system scan finds
+// packages the shell needs but the machine lacks. Install goes through
+// pkexec; "Later" remembers the current set and stays quiet until a new
+// package goes missing. Details opens the debug window's scan tab.
+Scope {
+    id: root
+
+    readonly property bool open: SystemCheck.promptOpen
+    readonly property var focusedScreen: Quickshell.screens.find(s => s.name === Hypr.focusedMonitor?.name) ?? Quickshell.screens[0]
+
+    StyledWindow {
+        id: win
+
+        screen: root.focusedScreen
+        name: "setup-prompt"
+        visible: root.open || closeTimer.running
+
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.keyboardFocus: root.open ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+        anchors.top: true
+        anchors.bottom: true
+        anchors.left: true
+        anchors.right: true
+
+        Timer {
+            id: closeTimer
+            interval: Tokens.anim.durations.large
+        }
+
+        Connections {
+            target: root
+            function onOpenChanged(): void {
+                if (!root.open)
+                    closeTimer.restart();
+            }
+        }
+
+        StyledRect {
+            anchors.fill: parent
+            color: Colours.palette.m3scrim
+            opacity: root.open ? 0.35 : 0
+
+            Behavior on opacity {
+                Anim {
+                    type: Anim.DefaultEffects
+                }
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: SystemCheck.dismissPrompt()
+            }
+        }
+
+        StyledRect {
+            id: card
+
+            anchors.centerIn: parent
+            implicitWidth: 460
+            implicitHeight: core.implicitHeight + Tokens.padding.small * 2
+
+            radius: Tokens.rounding.large
+            color: Qt.alpha(Colours.palette.m3surfaceContainer, 0.7)
+            border.width: 1
+            border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+
+            opacity: root.open ? 1 : 0
+            scale: root.open ? 1 : 0.92
+            focus: root.open
+
+            Keys.onEscapePressed: SystemCheck.dismissPrompt()
+
+            Behavior on opacity {
+                Anim {
+                    type: Anim.DefaultEffects
+                }
+            }
+
+            Behavior on scale {
+                Anim {
+                    type: Anim.Emphasized
+                }
+            }
+
+            StyledClippingRect {
+                id: core
+
+                anchors.fill: parent
+                anchors.margins: Tokens.padding.small
+
+                implicitHeight: inner.implicitHeight
+                radius: card.radius - Tokens.padding.small
+                color: Colours.palette.m3surfaceContainerLow
+
+                ColumnLayout {
+                    id: inner
+
+                    width: parent.width
+                    spacing: Tokens.spacing.medium
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.margins: Tokens.padding.extraLargeIncreased
+                        Layout.bottomMargin: 0
+                        spacing: Tokens.spacing.medium
+
+                        MaterialIcon {
+                            text: "healing"
+                            fill: 1
+                            color: Colours.palette.m3primary
+                            fontStyle: Tokens.font.icon.large
+                        }
+
+                        Column {
+                            Layout.fillWidth: true
+
+                            StyledText {
+                                text: qsTr("Missing packages")
+                                color: Colours.palette.m3onSurface
+                                font: Tokens.font.body.builders.large.weight(Font.Bold).build()
+                            }
+
+                            StyledText {
+                                text: qsTr("Caelestia++ works, but not at full function")
+                                color: Colours.palette.m3onSurfaceVariant
+                                font: Tokens.font.body.small
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Tokens.padding.extraLargeIncreased
+                        Layout.rightMargin: Tokens.padding.extraLargeIncreased
+                        spacing: Tokens.spacing.small
+
+                        Repeater {
+                            model: ScriptModel {
+                                values: SystemCheck.results.filter(r => r.fixType === "install")
+                            }
+
+                            RowLayout {
+                                id: row
+
+                                required property var modelData
+
+                                Layout.fillWidth: true
+                                spacing: Tokens.spacing.medium
+
+                                MaterialIcon {
+                                    text: row.modelData.status === "fail" ? "error" : "warning"
+                                    color: row.modelData.status === "fail" ? "#ff5c5c" : "#ffc233"
+                                }
+
+                                Column {
+                                    Layout.fillWidth: true
+
+                                    StyledText {
+                                        text: row.modelData.fixData
+                                        color: Colours.palette.m3onSurface
+                                        font: Tokens.font.mono.small
+                                    }
+
+                                    StyledText {
+                                        width: parent.width
+                                        text: row.modelData.detail
+                                        color: Colours.palette.m3onSurfaceVariant
+                                        font: Tokens.font.body.small
+                                        wrapMode: Text.WordWrap
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.margins: Tokens.padding.extraLargeIncreased
+                        Layout.topMargin: Tokens.padding.small
+                        spacing: Tokens.spacing.small
+
+                        TextButton {
+                            text: qsTr("Later")
+                            type: TextButton.Text
+                            onClicked: SystemCheck.dismissPrompt()
+                        }
+
+                        Item {
+                            Layout.fillWidth: true
+                        }
+
+                        TextButton {
+                            text: qsTr("Details")
+                            type: TextButton.Tonal
+                            onClicked: {
+                                SystemCheck.promptOpen = false;
+                                DebugConsole.panelTab = "scan";
+                                DebugConsole.open = true;
+                            }
+                        }
+
+                        TextButton {
+                            text: SystemCheck.busyId === "all" ? qsTr("Installing…") : qsTr("Install now")
+                            disabled: SystemCheck.busyId !== ""
+                            onClicked: {
+                                SystemCheck.installAllMissing();
+                                SystemCheck.dismissPrompt();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
