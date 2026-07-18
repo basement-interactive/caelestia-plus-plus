@@ -24,9 +24,11 @@ Singleton {
     IpcHandler {
         target: "security"
 
+        // NB: never name an IPC function "show" — it collides with the qs CLI
+        // `ipc show` subcommand and never invokes.
         function togglePanel(): void { root.panelOpen = !root.panelOpen; }
         function openPanel(): void { root.panelOpen = true; }
         function closePanel(): void { root.panelOpen = false; }
-        function show(which: string): void { root.open(which); }
+        function openTab(which: string): void { root.open(which); }
     }
 }
