@@ -146,9 +146,10 @@ Item {
 
             StyledText {
                 Layout.fillWidth: true
-                text: Http.selectedApps.length ? qsTr("Capturing %1 selected app%2").arg(Http.selectedApps.length).arg(Http.selectedApps.length === 1 ? "" : "s") : qsTr("Capture specific apps (routes just these, VPN-safe)")
+                text: Http.selectedApps.length ? qsTr("Capturing %1 selected app%2 (asks for your password once)").arg(Http.selectedApps.length).arg(Http.selectedApps.length === 1 ? "" : "s") : qsTr("Capture specific apps (routes just these, VPN-safe)")
                 color: Http.selectedApps.length ? Colours.palette.m3primary : Colours.palette.m3onSurfaceVariant
                 font: Tokens.font.body.small
+                wrapMode: Text.WordWrap
             }
 
             Flow {
@@ -225,41 +226,6 @@ Item {
                     text: qsTr("No running apps found — hit refresh")
                     color: Colours.palette.m3outline
                     font: Tokens.font.body.small
-                }
-            }
-
-            // One-time eBPF setup needed before per-app capture works.
-            StyledRect {
-                Layout.fillWidth: true
-                visible: Http.selectedApps.length > 0 && !Http.localReady
-                implicitHeight: setupRow.implicitHeight + Tokens.padding.medium * 2
-                radius: Tokens.rounding.small
-                color: Qt.alpha(root.warn, 0.12)
-
-                RowLayout {
-                    id: setupRow
-                    anchors.fill: parent
-                    anchors.margins: Tokens.padding.medium
-                    spacing: Tokens.spacing.medium
-
-                    MaterialIcon {
-                        text: "bolt"
-                        color: root.warn
-                    }
-
-                    StyledText {
-                        Layout.fillWidth: true
-                        text: qsTr("Per-app capture needs a one-time permission grant for the eBPF redirector.")
-                        color: Colours.palette.m3onSurfaceVariant
-                        font: Tokens.font.body.small
-                        wrapMode: Text.WordWrap
-                    }
-
-                    TextButton {
-                        text: qsTr("Enable")
-                        type: TextButton.Tonal
-                        onClicked: Http.enablePerApp()
-                    }
                 }
             }
         }

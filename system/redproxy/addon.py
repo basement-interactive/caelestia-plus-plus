@@ -164,6 +164,16 @@ class Redproxy:
         elif t == "clear":
             self.flows = {k: v for k, v in self.flows.items() if k in self.held}
             self._broadcast({"t": "cleared"})
+        elif t == "setlocal":
+            # Change which apps eBPF local mode captures, live — no restart, so
+            # no repeated privilege prompt. Runtime mode updates reconfigure the
+            # proxy servers in place.
+            apps = msg.get("apps") or []
+            port = os.environ.get("REDPROXY_PORT", "8081")
+            modes = [f"regular@{port}"]
+            if apps:
+                modes.append("local:" + ",".join(apps))
+            ctx.options.update(mode=modes)
         elif t == "shutdown":
             # Clean self-exit. Used to stop a root (local-mode) mitmdump, which
             # the unprivileged shell cannot signal (setuid child).
