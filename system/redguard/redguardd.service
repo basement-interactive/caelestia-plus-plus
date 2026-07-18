@@ -1,0 +1,20 @@
+[Unit]
+Description=Redguard behavioral process protection
+Documentation=file:///opt/redguard/README.md
+After=multi-user.target
+
+[Service]
+Type=simple
+# /run/redguard (socket) and /var/lib/redguard (rules), created and owned by
+# root. Runs as root: the proc connector needs CAP_NET_ADMIN, and freezing or
+# killing another user's process needs full signal permission — over-narrowing
+# capabilities here breaks /proc access to other UIDs, so we don't.
+RuntimeDirectory=redguard
+RuntimeDirectoryMode=0755
+StateDirectory=redguard
+ExecStart=/usr/bin/python3 /opt/redguard/redguardd.py --ui-gid __UIGID__
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

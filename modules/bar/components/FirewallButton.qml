@@ -5,16 +5,17 @@ import Caelestia.Config
 import qs.components
 import qs.services
 
-// Bar shield. Three states, each its own icon + behaviour:
-//   disconnected -> dim struck shield (daemon not running)
-//   pending      -> red shield-with-! that pulses + shows a count badge
-//   clear        -> calm red shield-with-check
+// Bar shield: opens the tabbed security center (Protection, Firewall, HTTP,
+// Startup). Reflects both guards at once:
+//   neither running -> dim struck shield
+//   something frozen/pending -> red shield-with-! that pulses + count badge
+//   both clear -> calm shield-with-check
 Item {
     id: root
 
-    readonly property bool connected: Firewall.connected
-    readonly property bool active: Firewall.enabled
-    readonly property int pending: Firewall.pendingCount
+    readonly property bool connected: Firewall.connected || Protection.connected
+    readonly property bool active: (Firewall.connected && Firewall.enabled) || (Protection.connected && Protection.enabled)
+    readonly property int pending: Firewall.pendingCount + Protection.pendingCount
 
     implicitWidth: icon.implicitHeight + Tokens.padding.small
     implicitHeight: icon.implicitHeight
@@ -27,7 +28,8 @@ Item {
         implicitWidth: implicitHeight
         implicitHeight: icon.implicitHeight + Tokens.padding.small
         radius: Tokens.rounding.full
-        onClicked: Firewall.panelOpen = !Firewall.panelOpen
+        // Open on whichever guard is asking; default to Protection otherwise.
+        onClicked: Security.open(Firewall.pendingCount > 0 && Protection.pendingCount === 0 ? "firewall" : "protection")
     }
 
     MaterialIcon {
@@ -40,7 +42,7 @@ Item {
         // hover scale-up; QtRendering stays crisp at any scale.
         renderType: Text.QtRendering
         color: !root.connected || !root.active ? Colours.palette.m3outline : Colours.palette.m3primary
-        fill: root.active && (root.pending > 0 || Firewall.panelOpen) ? 1 : 0
+        fill: root.active && (root.pending > 0 || Security.panelOpen) ? 1 : 0
         fontStyle: Tokens.font.icon.builders.small.weight(Font.Bold).build()
         scale: stateLayer.pressed ? 1.05 : stateLayer.containsMouse ? 1.2 : 1
 

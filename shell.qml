@@ -11,6 +11,7 @@ import "modules/areapicker"
 import "modules/easteregg"
 import "modules/lock"
 import "modules/firewall"
+import "modules/protection"
 import "modules/features"
 import "modules/debug"
 import QtQuick
@@ -37,7 +38,8 @@ ShellRoot {
         id: lock
     }
     FirewallPrompt {}
-    FirewallPanel {}
+    ProtectionPrompt {}
+    SecurityCenter {}
     FeaturesMenu {}
     DebugPanel {}
     SetupPrompt {}

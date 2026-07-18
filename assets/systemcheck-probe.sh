@@ -33,6 +33,12 @@ for f in max-perf anti-heat dynamic bed-mode; do
     if systemctl is-enabled -q "$f-sync.path" 2>/dev/null; then en=1; else en=0; fi
     echo "ver|$f|$repo|$inst|$en"
 done
+# redguard is a plain service (no sync.path); track it the same way
+rrepo=$(grep -m1 '^root_half_version=' "$SHELLDIR/system/redguard/install.sh" 2>/dev/null | cut -d= -f2)
+[ -n "$rrepo" ] || rrepo=0
+rinst=$(cat "/etc/caelestia/redguard.version" 2>/dev/null || echo 0)
+if systemctl is-enabled -q redguardd.service 2>/dev/null; then ren=1; else ren=0; fi
+echo "ver|redguard|$rrepo|$rinst|$ren"
 echo "gitdirty|$(git -C "$SHELLDIR" status --porcelain 2>/dev/null | grep -c .)"
 
 # Bar entry ids from the user config, for typo detection shell-side
