@@ -1,10 +1,11 @@
-# Sandrunner — fake-root throwaway sandbox
+# Sandrunner — fake-root throwaway simulation sandbox
 
 Run any untrusted file with `sandrunner FILE [args...]` and it executes
-believing it is root — `id -u` is 0, `sudo`/`doas`/`pkexec`/`su` all "work" —
-while actually confined to an unprivileged bubblewrap user namespace that
-cannot touch the host. No install, no daemon, no root: the sandbox is built
-per-run and evaporates on exit.
+believing it is root on your real system — `id -u` is 0, `sudo`/`doas`/
+`pkexec`/`su` all "work", `pacman -S` genuinely installs, config edits stick —
+while actually confined to an unprivileged bubblewrap user namespace whose
+every write lands in a throwaway fuse-overlayfs layer. The host never
+changes; the whole world evaporates on exit. No daemon, no root.
 
 ## What the program sees vs. what it gets
 
@@ -12,12 +13,15 @@ per-run and evaporates on exit.
 |------|------|
 | uid 0, `whoami` → root | user namespace mapped to your uid, **zero capabilities** (`CapEff: 0`), no-new-privs set |
 | working `sudo` / `doas` / `pkexec` / `su` | shims that strip the options and run the command as-is (already "root") |
-| `/usr`, `/bin`, `/lib` | host's, **read-only** — even "sudo" writes fail |
-| `/etc` | only passwd/group (synthetic, no host users), ld.so, ssl/ca-certificates, nsswitch, localtime |
+| **writable** `/usr`, `/etc`, `/opt`, pacman DB + cache | fuse-overlayfs merged views — writes go to a throwaway upper layer, the host stays untouched; `sudo pacman -S pkg` fully installs (with `--net`), then vanishes |
+| `/etc/passwd`, hostname | synthetic (root+nobody, `sandbox`) even though the rest of /etc is the host's |
 | writable `/root`, `/tmp`, `/var`, `/run` | size-capped tmpfs (1G/1G/256M/64M), discarded on exit |
 | network, other processes, `/home`, real hostname | nothing — net/pid/ipc/uts unshared, `/home` not mounted at all |
 | normal syscalls | seccomp filter (`Seccomp: 2`) on top — see below |
 | room to fork/allocate | cgroup scope: TasksMax=512, MemoryMax=50% of RAM, swap denied |
+
+Without fuse-overlayfs installed the sandbox falls back to the old read-only
+view (installs fail realistically instead of succeeding).
 
 ## Hardening layers
 
@@ -41,19 +45,22 @@ per-run and evaporates on exit.
 
 Verified live: fork bomb (600 spawns) hit the task cap and died inside;
 `unshare`, `dmesg`, `io_uring_setup`, `keyctl` all return
-`Operation not permitted`; `rm -rf /usr/share/doc` as "sudo" bounced off the
-read-only mount file-by-file.
+`Operation not permitted`; `sudo pacman -S --noconfirm tree` with `--net`
+downloaded, ran hooks and installed inside the overlay (`tree` runnable),
+host DB untouched; `rm /usr/bin/ls` "worked" inside, `/usr/bin/ls` intact
+on the host.
 
 ## Usage
 
 ```
 sandrunner suspicious.sh                 # script, fully isolated
 sandrunner ./installer arg1 arg2         # args pass through, exit code too
-sandrunner "sudo rm -rf /usr/share/doc"  # probe a command: every rm fails,
+sandrunner "sudo rm -rf /usr/share/doc"  # probe: rm "succeeds" in the overlay,
                                          # host untouched
 sandrunner ls -la /root                  # unquoted commands work too
 sandrunner --net fetcher.sh              # allow network (adds resolv.conf/hosts)
 sandrunner --gui ./some-app              # Wayland/X11 socket + /dev/dri passthrough
+sandrunner --net "sudo pacman -S htop"   # full simulated install, discarded
 sandrunner --bind-dir ./app/run.sh       # mount parent dir ro so relative paths work
 sandrunner --shell                       # poke around the empty sandbox yourself
 sandrunner --shell FILE                  # sandbox with FILE mounted, shell first
@@ -65,18 +72,26 @@ doesn't exist still errors, so typos aren't silently reinterpreted).
 Non-executable files are run via a `chmod +x` copy automatically. Exit code of
 the sandboxed program is propagated.
 
-Command probing shows what a command *touches*, not what it would do on the
-real system: there is no systemd/dbus inside, so e.g.
-`sandrunner "sudo systemctl stop foo"` fails with a bus error rather than
-simulating the stop. Filesystem-touching commands (`rm`, `install`, `cp`,
-package scripts) probe realistically — writes land on read-only mounts or
-throwaway tmpfs.
+Simulation is filesystem-true, not service-true: there is no systemd/dbus
+inside, so e.g. `sandrunner "sudo systemctl stop foo"` fails with a bus error
+rather than simulating the stop. Filesystem-touching commands (`rm`,
+`install`, `cp`, `pacman`, installers, config edits) behave exactly as they
+would on the host — into the throwaway overlay. pacman specifics: snapshot
+pre-hooks (snap-pac/timeshift) are masked and `DownloadUser`/scriptlet
+network isolation are disabled inside (they need capabilities fake root
+doesn't have); package installs need `--net` unless the package is already
+in the host's pacman cache.
 
 ## Caveats
 
 - `--gui` hands the app your compositor socket: it can read window contents /
   inject input on permissive compositors. Only use it for apps you merely
   distrust, not ones you assume are hostile.
+- The overlaid `/etc` exposes the host's world-readable config to the
+  program (root-only files like shadow stay unreadable); identity files and
+  hostname are still synthetic.
+- Overlay upper layers live under `/tmp` for the run — a huge simulated
+  install is bounded by your `/tmp` size.
 - `--bind-dir` exposes sibling files of FILE (read-only) to the program.
 - `--net` is full outbound network; combine with distrust accordingly
   (Redwall still sees the traffic — it egresses as your uid).
@@ -89,8 +104,9 @@ throwaway tmpfs.
 
 ## Install
 
-Nothing to install; a symlink makes it a command:
+Two packages and a symlink (the installer and the system scan do all this):
 
 ```
+sudo pacman -S --needed bubblewrap fuse-overlayfs
 ln -sf "$HOME/.config/quickshell/caelestia/system/sandrunner/sandrunner" ~/.local/bin/sandrunner
 ```

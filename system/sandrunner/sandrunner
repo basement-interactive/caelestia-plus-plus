@@ -137,7 +137,15 @@ command -v bwrap > /dev/null || die "bubblewrap not installed (pacman -S bubblew
 here=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 
 staging=$(mktemp -d --tmpdir sandrunner.XXXXXX)
-trap 'rm -rf "$staging"' EXIT
+overlay_mounts=()
+cleanup() {
+    local m
+    for m in "${overlay_mounts[@]}"; do
+        fusermount3 -uz "$m" 2>/dev/null || true
+    done
+    rm -rf "$staging"
+}
+trap cleanup EXIT
 write_shims "$staging"
 python3 "$here/seccomp-gen.py" "$staging/seccomp.bpf" ||
     die "seccomp filter generation failed"
@@ -176,37 +184,129 @@ bwrap_args=(
     --setenv LANG "${LANG:-C.UTF-8}"
     --proc /proc
     --dev /dev
-    --ro-bind /usr /usr
     --symlink usr/bin /bin
     --symlink usr/bin /sbin
     --symlink usr/lib /lib
     --symlink usr/lib /lib64
     --size $((1024 * 1024 * 1024)) --tmpfs /root
     --size $((1024 * 1024 * 1024)) --tmpfs /tmp
-    --size $((256 * 1024 * 1024)) --tmpfs /var
     --size $((64 * 1024 * 1024)) --tmpfs /run
     --ro-bind "$staging" /run/fakebin
-    --ro-bind "$staging/passwd" /etc/passwd
-    --ro-bind "$staging/group" /etc/group
 )
-# /opt read-only alongside /usr: system-installed software (spotify, chrome,
-# …) lives there and /usr wrapper scripts exec into it. Same trust level as
-# /usr, still unwritable even to "root".
-[[ -d /opt ]] && bwrap_args+=(--ro-bind /opt /opt)
 
-# Only the /etc entries programs commonly need at runtime; the rest of /etc
-# stays invisible.
-for etc_path in ld.so.cache ld.so.conf ld.so.conf.d ssl ca-certificates \
-                nsswitch.conf localtime; do
-    [[ -e /etc/$etc_path ]] &&
-        bwrap_args+=(--ro-bind "/etc/$etc_path" "/etc/$etc_path")
-done
+# Full-simulation mode: /usr, /etc, /opt and the pacman DB/cache are exposed
+# WRITABLE through fuse-overlayfs merged views whose upper layers live in the
+# staging dir — "sudo pacman -S", installers and config edits really execute,
+# the host never changes, and everything evaporates on exit. Kernel overlayfs
+# cannot do this unprivileged: host-root-owned files are unmapped ("nobody")
+# inside a single-uid user namespace and no capability overrides an unmapped
+# owner. fuse-overlayfs squash_to_uid presents every file as owned by the
+# mounting user, which the namespace then maps to (fake) root.
+sim=0
+if command -v fuse-overlayfs >/dev/null && command -v fusermount3 >/dev/null; then
+    sim=1
+fi
+
+MERGED=
+mount_overlay() {
+    local name=$1 lower=$2
+    local d="$staging/ov/$name"
+    mkdir -p "$d/up" "$d/work" "$d/m"
+    fuse-overlayfs -o "squash_to_uid=$(id -u),squash_to_gid=$(id -g)" \
+        -o "lowerdir=$lower,upperdir=$d/up,workdir=$d/work" "$d/m" 2>/dev/null ||
+        return 1
+    overlay_mounts+=("$d/m")
+    MERGED=$d/m
+}
+
+if [[ $sim -eq 1 ]] && mount_overlay usr /usr; then
+    bwrap_args+=(--bind "$MERGED" /usr --size $((256 * 1024 * 1024)) --tmpfs /var)
+    if mount_overlay etc /etc; then
+        bwrap_args+=(--bind "$MERGED" /etc)
+        # Snapshot pre-hooks (snap-pac, timeshift) abort the whole pacman
+        # transaction in here — there is no dbus or snapper to talk to.
+        # Mask them the pacman way: a same-named /dev/null symlink in the
+        # higher-precedence hook dir, written into the overlay only.
+        mkdir -p "$MERGED/pacman.d/hooks"
+        for hook in /usr/share/libalpm/hooks/*snap-pac* /usr/share/libalpm/hooks/*timeshift* \
+                    /etc/pacman.d/hooks/*snap-pac* /etc/pacman.d/hooks/*timeshift*; do
+            if [[ -e $hook ]]; then
+                ln -sf /dev/null "$MERGED/pacman.d/hooks/$(basename "$hook")"
+            fi
+        done
+    fi
+    # Writable pacman DB + package cache so package operations behave
+    # exactly like they would on the host (and then vanish).
+    for var_path in /var/lib/pacman /var/cache/pacman; do
+        if [[ -d $var_path ]] && mount_overlay "${var_path//\//_}" "$var_path"; then
+            bwrap_args+=(--bind "$MERGED" "$var_path")
+        fi
+    done
+    if [[ -d /opt ]] && mount_overlay opt /opt; then
+        bwrap_args+=(--bind "$MERGED" /opt)
+    fi
+    # Re-assert the synthetic identity over the merged real /etc: the user
+    # list stays root+nobody and the hostname stays fake.
+    echo sandbox > "$staging/hostname"
+    bwrap_args+=(
+        --ro-bind "$staging/passwd" /etc/passwd
+        --ro-bind "$staging/group" /etc/group
+        --ro-bind "$staging/hostname" /etc/hostname
+    )
+    # pacman's DownloadUser drops privileges to a host uid that does not
+    # exist in this single-uid namespace — strip it so downloads run as the
+    # (fake) root like everything else. DisableSandboxNetwork: alpm wraps
+    # every scriptlet/hook in its own network-isolation sandbox, but
+    # unshare(CLONE_NEWNET) needs CAP_SYS_ADMIN, which fake root lacks —
+    # without the override every hook dies on EPERM. Our sandbox already
+    # denies the network unless --net was given.
+    if [[ -f /etc/pacman.conf ]]; then
+        sed -e 's/^[[:space:]]*DownloadUser/#&/' \
+            -e '/^\[options\]/a DisableSandboxNetwork' \
+            /etc/pacman.conf > "$staging/pacman.conf"
+        bwrap_args+=(--ro-bind "$staging/pacman.conf" /etc/pacman.conf)
+    fi
+else
+    sim=0
+    echo "sandrunner: warning: fuse-overlayfs not available — read-only" \
+         "fallback (system visible but unwritable; installs fail)" >&2
+    bwrap_args+=(
+        --ro-bind /usr /usr
+        --size $((256 * 1024 * 1024)) --tmpfs /var
+        --ro-bind "$staging/passwd" /etc/passwd
+        --ro-bind "$staging/group" /etc/group
+    )
+    # /opt read-only alongside /usr: system-installed software (spotify,
+    # chrome, …) lives there and /usr wrapper scripts exec into it.
+    if [[ -d /opt ]]; then
+        bwrap_args+=(--ro-bind /opt /opt)
+    fi
+    # Only the /etc entries programs commonly need at runtime; the rest of
+    # /etc stays invisible.
+    for etc_path in ld.so.cache ld.so.conf ld.so.conf.d ssl ca-certificates \
+                    nsswitch.conf localtime; do
+        if [[ -e /etc/$etc_path ]]; then
+            bwrap_args+=(--ro-bind "/etc/$etc_path" "/etc/$etc_path")
+        fi
+    done
+fi
 
 if [[ $allow_net -eq 1 ]]; then
     bwrap_args+=(--share-net)
     for etc_path in resolv.conf hosts; do
-        [[ -e /etc/$etc_path ]] &&
-            bwrap_args+=(--ro-bind "/etc/$etc_path" "/etc/$etc_path")
+        [[ -e /etc/$etc_path ]] || continue
+        # In sim mode a regular file is already there via the /etc overlay;
+        # only symlinks need help (the stub resolver points into /run, a
+        # fresh tmpfs here). bwrap can't create a bind dest through a
+        # dangling symlink, so bind the content at the symlink's TARGET —
+        # the /etc symlink then resolves to it.
+        dest=/etc/$etc_path
+        if [[ $sim -eq 1 ]]; then
+            [[ -L /etc/$etc_path ]] || continue
+            dest=$(realpath -m "/etc/$etc_path")
+        fi
+        cat "/etc/$etc_path" > "$staging/net-$etc_path" 2>/dev/null || continue
+        bwrap_args+=(--ro-bind "$staging/net-$etc_path" "$dest")
     done
 fi
 

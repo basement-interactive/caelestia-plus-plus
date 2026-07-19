@@ -46,8 +46,9 @@ echo "gitdirty|$(git -C "$SHELLDIR" status --porcelain 2>/dev/null | grep -c .)"
 sr_link=missing
 [ "$(readlink -f "$HOME/.local/bin/sandrunner" 2>/dev/null)" = "$(readlink -f "$SHELLDIR/system/sandrunner/sandrunner")" ] && sr_link=ok
 command -v bwrap >/dev/null 2>&1 && sr_bwrap=ok || sr_bwrap=missing
+command -v fuse-overlayfs >/dev/null 2>&1 && sr_fuse=ok || sr_fuse=missing
 case ":$PATH:" in *":$HOME/.local/bin:"*) sr_path=ok ;; *) sr_path=missing ;; esac
-echo "sandrunner|$sr_link|$sr_bwrap|$sr_path"
+echo "sandrunner|$sr_link|$sr_bwrap|$sr_path|$sr_fuse"
 
 # Bar entry ids from the user config, for typo detection shell-side
 python3 - "$HOME/.config/caelestia/shell.json" <<'PY' 2>/dev/null || echo "barids|"
