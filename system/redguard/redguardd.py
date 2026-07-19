@@ -61,6 +61,9 @@ from pathlib import Path
 
 SOCK_PATH = "/run/redguard/ui.sock"
 RULES_PATH = "/var/lib/redguard/rules.json"
+# A frozen process whose verdict can never arrive (shell crashed, prompt
+# missed) fails open after this many seconds, like the no-UI path.
+ASK_TIMEOUT = 60
 
 # Interpreters/shells worth inspecting. A reverse shell is almost always one of
 # these; a normal one has pty/pipe stdio and is released instantly.
@@ -97,6 +100,17 @@ class Rules:
             self._data = json.loads(self._path.read_text())
         except (OSError, json.JSONDecodeError):
             self._data = {}
+            return
+        # Migration: interpreter rules are poison and must never exist. A
+        # remembered "block" on /usr/bin/bash (the exe of a reverse-shell
+        # detection IS the interpreter) silently SIGKILLs every shell script
+        # forever; a remembered "allow" disables detection wholesale.
+        bad = [exe for exe in self._data if Path(exe).name in INTERPRETERS]
+        if bad:
+            for exe in bad:
+                print(f"[redguard] dropping unsafe interpreter rule: {exe}", flush=True)
+                del self._data[exe]
+            self.save()
 
     def save(self) -> None:
         try:
@@ -112,6 +126,9 @@ class Rules:
             return (self._data.get(exe) or {}).get("action")
 
     def set(self, exe: str, action: str, name: str | None = None) -> None:
+        if Path(exe).name in INTERPRETERS:
+            print(f"[redguard] refusing to remember a rule for interpreter {exe}", flush=True)
+            return
         with self._lock:
             entry = self._data.get(exe, {})
             entry.update(action=action, name=name or entry.get("name") or Path(exe).name,
@@ -349,7 +366,7 @@ class Redguard:
         # Fail open: nobody to ask -> release and log rather than hang forever.
         if not self.clients_connected():
             self._cont(pid)
-            self.broadcast_threadsafe({"t": "event", "kind": "unmonitored", **detection})
+            self.broadcast_threadsafe({"t": "event", **detection, "kind": "unmonitored"})
             print(f"[redguard] released (no UI): {detection}", flush=True)
             return
 
@@ -470,6 +487,23 @@ class Redguard:
         async with server:
             await server.serve_forever()
 
+    async def reap_stale_asks(self) -> None:
+        # Fail-open reaper: nothing may stay frozen forever waiting for a
+        # verdict. Timed-out asks are released and reported as an event.
+        while True:
+            await asyncio.sleep(5)
+            now = time.time()
+            with self._lock:
+                stale = [self.pending.pop(i) for i in
+                         [i for i, e in self.pending.items() if now - e["ts"] > ASK_TIMEOUT]]
+            for entry in stale:
+                self._cont(entry["pid"])
+                self._broadcast({"t": "resolved", "id": entry["id"]})
+                self._broadcast({"t": "event", "kind": "timeout-release",
+                                 "name": entry["name"], "exe": entry["exe"],
+                                 "detail": f"no verdict within {ASK_TIMEOUT}s — released"})
+                print(f"[redguard] released after timeout: {entry['exe']}", flush=True)
+
     # -- simulate ----------------------------------------------------------- #
     def _sim_inject(self, msg: dict) -> None:
         with self._lock:
@@ -563,7 +597,8 @@ def main() -> None:
         threading.Thread(target=proc_connector_thread, args=(guard,), daemon=True).start()
 
     async def _run():
-        tasks = [asyncio.create_task(guard.run_server())]
+        tasks = [asyncio.create_task(guard.run_server()),
+                 asyncio.create_task(guard.reap_stale_asks())]
         if args.simulate:
             tasks.append(asyncio.create_task(guard._sim_seed()))
         await asyncio.gather(*tasks)

@@ -117,9 +117,17 @@ Singleton {
             root.pending = root.pending.filter(p => p.id !== msg.id);
         } else if (msg.t === "state") {
             root.enabled = msg.enabled ?? true;
+        } else if (msg.t === "event") {
+            // Silent daemon actions must never be invisible to the user:
+            // auto-blocks from remembered rules and timeout releases both
+            // surface as toasts (there is no prompt for either).
+            if (msg.kind === "blocked")
+                Toaster.toast(qsTr("Protection blocked %1").arg(msg.name ?? "a process"), msg.detail ?? "", "gpp_bad");
+            else if (msg.kind === "timeout-release")
+                Toaster.toast(qsTr("%1 released without a verdict").arg(msg.name ?? "A frozen process"), msg.detail ?? "", "history_toggle_off");
+            else if (msg.kind === "unmonitored")
+                Toaster.toast(qsTr("Suspicious %1 released").arg(msg.name ?? "process"), qsTr("Detected while no UI was connected — review the rules tab"), "gpp_maybe");
         }
-        // "event" messages (auto-block / released-no-UI notices) are advisory;
-        // the log tab can surface them later, no action needed here.
     }
 
     // A Quickshell Socket does not reliably re-attempt after a failed connect
