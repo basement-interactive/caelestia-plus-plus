@@ -81,10 +81,10 @@ StackView {
                 required property QsMenuEntry modelData
 
                 implicitWidth: Tokens.sizes.bar.trayMenuWidth
-                implicitHeight: modelData.isSeparator ? 1 : children.implicitHeight
+                implicitHeight: modelData?.isSeparator ? 1 : children.implicitHeight
 
                 radius: Tokens.rounding.full
-                color: modelData.isSeparator ? Colours.palette.m3outlineVariant : "transparent"
+                color: modelData?.isSeparator ? Colours.palette.m3outlineVariant : "transparent"
 
                 Loader {
                     id: children
@@ -93,7 +93,7 @@ StackView {
                     anchors.left: parent.left
                     anchors.right: parent.right
 
-                    active: !item.modelData.isSeparator
+                    active: !(item.modelData?.isSeparator ?? true)
 
                     sourceComponent: Item {
                         implicitHeight: label.implicitHeight
@@ -113,7 +113,7 @@ StackView {
                             anchors.rightMargin: -Tokens.padding.small
 
                             radius: item.radius
-                            disabled: !item.modelData.enabled
+                            disabled: !(item.modelData?.enabled ?? false)
 
                             onClicked: {
                                 const entry = item.modelData;

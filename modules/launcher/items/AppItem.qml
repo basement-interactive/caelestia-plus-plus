@@ -31,7 +31,7 @@ Item {
         running: true
 
         PauseAnimation {
-            duration: Math.min(root.index, 10) * 30
+            duration: Math.max(0, Math.min(root.index, 10)) * 30
         }
         ParallelAnimation {
             Anim {
