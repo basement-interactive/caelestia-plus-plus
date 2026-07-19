@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# Caelestia++ sandrunner: run an untrusted file as fake root in a throwaway
+# bubblewrap sandbox.
+#
+#   sandrunner [options] FILE [args...]
+#
+# The program sees uid 0 and working sudo/doas/pkexec/su, but "root" is an
+# unprivileged user namespace with every capability dropped and no-new-privs
+# set. The host filesystem is read-only (/usr plus a hand-picked slice of
+# /etc), $HOME is a tmpfs that vanishes on exit, and pid/net/ipc/uts
+# namespaces are unshared. Nothing the program does survives or escapes.
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: sandrunner [options] FILE [args...]
+       sandrunner [options] "COMMAND ..."
+       sandrunner --shell
+
+Run FILE, or a command line, as fake root inside a disposable bubblewrap
+sandbox. The first argument is treated as a file if it exists, otherwise
+the arguments are run as a shell command:
+
+  sandrunner "sudo systemctl stop foo.service"   # probe a command safely
+
+Options:
+  --net       allow network access (default: none)
+  --gui       pass Wayland/X11 sockets + GPU through (weakens isolation:
+              compositor can be talked to)
+  --bind-dir  mount FILE's parent directory read-only instead of the file
+              alone, so relative asset paths work (exposes sibling files)
+  --shell     drop into an interactive shell in the sandbox instead of,
+              or after locating, FILE
+  -h, --help  show this help
+EOF
+}
+
+die() {
+    echo "sandrunner: $*" >&2
+    exit 1
+}
+
+# Shims live on a tmpdir bound read-only into the sandbox at /run/fakebin,
+# first in PATH. Each privilege-escalation tool becomes "you are already
+# root, just run it".
+write_shims() {
+    local dir=$1
+
+    cat > "$dir/sudo" <<'EOF'
+#!/bin/sh
+# sandrunner shim: sandbox already runs as (fake) root, strip sudo options
+# and run the command directly.
+while [ $# -gt 0 ]; do
+    case $1 in
+        -u|--user|-g|--group|-p|--prompt|-C|--close-from) shift 2 || exit 1 ;;
+        --) shift; break ;;
+        -*) shift ;;
+        *) break ;;
+    esac
+done
+[ $# -eq 0 ] && exec /bin/sh -i
+exec "$@"
+EOF
+
+    cat > "$dir/su" <<'EOF'
+#!/bin/sh
+# sandrunner shim: su target is always "root", which we already are.
+cmd=
+while [ $# -gt 0 ]; do
+    case $1 in
+        -c|--command) cmd=$2; shift 2 || exit 1 ;;
+        *) shift ;;
+    esac
+done
+[ -n "$cmd" ] && exec /bin/sh -c "$cmd"
+exec /bin/sh -i
+EOF
+
+    chmod 755 "$dir/sudo" "$dir/su"
+    cp "$dir/sudo" "$dir/doas"
+    cp "$dir/sudo" "$dir/pkexec"
+    chmod 755 "$dir/doas" "$dir/pkexec"
+
+    # Minimal identity files so whoami/getent agree the sandbox user is root,
+    # without leaking the host user list.
+    cat > "$dir/passwd" <<'EOF'
+root:x:0:0:root:/root:/bin/bash
+nobody:x:65534:65534:nobody:/:/usr/bin/nologin
+EOF
+    cat > "$dir/group" <<'EOF'
+root:x:0:
+nobody:x:65534:
+EOF
+}
+
+allow_net=0
+gui=0
+bind_dir=0
+want_shell=0
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --net) allow_net=1; shift ;;
+        --gui) gui=1; shift ;;
+        --bind-dir) bind_dir=1; shift ;;
+        --shell) want_shell=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        --) shift; break ;;
+        -*) die "unknown option: $1 (see --help)" ;;
+        *) break ;;
+    esac
+done
+
+if [[ $# -eq 0 && $want_shell -eq 0 ]]; then
+    usage >&2
+    exit 1
+fi
+
+target=
+command_line=
+if [[ $# -gt 0 ]]; then
+    if [[ -f $1 ]]; then
+        target=$(realpath -e "$1")
+        shift
+    elif [[ $1 != *[[:space:]]* && ( $1 == */* || $1 == *.sh ) ]]; then
+        # A single space-less path-looking token is a file typo, not a
+        # command — don't silently reinterpret it.
+        die "no such file: $1"
+    else
+        command_line=$*
+        set --
+    fi
+fi
+
+command -v bwrap > /dev/null || die "bubblewrap not installed (pacman -S bubblewrap)"
+
+here=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
+
+staging=$(mktemp -d --tmpdir sandrunner.XXXXXX)
+trap 'rm -rf "$staging"' EXIT
+write_shims "$staging"
+python3 "$here/seccomp-gen.py" "$staging/seccomp.bpf" ||
+    die "seccomp filter generation failed"
+
+# Cgroup scope caps fork bombs and memory exhaustion — the namespaces alone
+# don't stop resource DoS against the host.
+launcher=()
+if [[ -d /run/user/$(id -u)/systemd ]] && command -v systemd-run > /dev/null; then
+    launcher=(
+        systemd-run --user --scope --quiet
+        -p TasksMax=512 -p MemoryMax=50% -p MemorySwapMax=0
+    )
+else
+    echo "sandrunner: warning: no user systemd manager, running without" \
+         "TasksMax/MemoryMax caps" >&2
+fi
+
+bwrap_args=(
+    --unshare-all
+    # --unshare-all only implies --unshare-user-try; --disable-userns
+    # insists on the explicit form.
+    --unshare-user
+    --disable-userns
+    --die-with-parent
+    --new-session
+    --seccomp 9
+    --uid 0 --gid 0
+    --hostname sandbox
+    --clearenv
+    --setenv HOME /root
+    --setenv USER root
+    --setenv LOGNAME root
+    --setenv SHELL /bin/sh
+    --setenv PATH /run/fakebin:/usr/local/bin:/usr/bin
+    --setenv TERM "${TERM:-xterm-256color}"
+    --setenv LANG "${LANG:-C.UTF-8}"
+    --proc /proc
+    --dev /dev
+    --ro-bind /usr /usr
+    --symlink usr/bin /bin
+    --symlink usr/bin /sbin
+    --symlink usr/lib /lib
+    --symlink usr/lib /lib64
+    --size $((1024 * 1024 * 1024)) --tmpfs /root
+    --size $((1024 * 1024 * 1024)) --tmpfs /tmp
+    --size $((256 * 1024 * 1024)) --tmpfs /var
+    --size $((64 * 1024 * 1024)) --tmpfs /run
+    --ro-bind "$staging" /run/fakebin
+    --ro-bind "$staging/passwd" /etc/passwd
+    --ro-bind "$staging/group" /etc/group
+)
+
+# Only the /etc entries programs commonly need at runtime; the rest of /etc
+# stays invisible.
+for etc_path in ld.so.cache ld.so.conf ld.so.conf.d ssl ca-certificates \
+                nsswitch.conf localtime; do
+    [[ -e /etc/$etc_path ]] &&
+        bwrap_args+=(--ro-bind "/etc/$etc_path" "/etc/$etc_path")
+done
+
+if [[ $allow_net -eq 1 ]]; then
+    bwrap_args+=(--share-net)
+    for etc_path in resolv.conf hosts; do
+        [[ -e /etc/$etc_path ]] &&
+            bwrap_args+=(--ro-bind "/etc/$etc_path" "/etc/$etc_path")
+    done
+fi
+
+if [[ $gui -eq 1 ]]; then
+    bwrap_args+=(--setenv XDG_RUNTIME_DIR /run/user/0)
+    if [[ -n ${WAYLAND_DISPLAY:-} && -S ${XDG_RUNTIME_DIR:-}/$WAYLAND_DISPLAY ]]; then
+        # Sockets need a rw bind for connect() to succeed.
+        bwrap_args+=(
+            --bind "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" /run/user/0/wayland-0
+            --setenv WAYLAND_DISPLAY wayland-0
+        )
+    fi
+    if [[ -n ${DISPLAY:-} && -d /tmp/.X11-unix ]]; then
+        bwrap_args+=(
+            --bind /tmp/.X11-unix /tmp/.X11-unix
+            --setenv DISPLAY "$DISPLAY"
+        )
+    fi
+    # Mesa resolves GPUs through /sys/dev/char; without /sys GL init fails.
+    [[ -d /dev/dri ]] && bwrap_args+=(--dev-bind /dev/dri /dev/dri --ro-bind /sys /sys)
+    [[ -d /etc/fonts ]] && bwrap_args+=(--ro-bind /etc/fonts /etc/fonts)
+fi
+
+run_path=
+if [[ -z $target ]]; then
+    bwrap_args+=(--chdir /root)
+else
+    if [[ $bind_dir -eq 1 ]]; then
+        target_dir=$(dirname "$target")
+        bwrap_args+=(--ro-bind "$target_dir" "$target_dir" --chdir "$target_dir")
+        run_path=$target
+    else
+        bwrap_args+=(--ro-bind "$target" "$target" --chdir /root)
+        run_path=$target
+    fi
+    if [[ ! -x $target ]]; then
+        # Read-only bind can't be chmodded inside; run a +x copy instead.
+        install -m755 "$target" "$staging/$(basename "$target")"
+        run_path=/run/fakebin/$(basename "$target")
+        echo "sandrunner: $target not executable, running +x copy" >&2
+    fi
+fi
+
+# No exec: the EXIT trap must survive to clean up the staging dir. fd 9
+# carries the seccomp program into bwrap (--seccomp 9 above).
+status=0
+if [[ $want_shell -eq 1 ]]; then
+    if [[ -n $target ]]; then
+        echo "sandrunner: target at $run_path" >&2
+    fi
+    "${launcher[@]}" bwrap "${bwrap_args[@]}" /bin/bash \
+        9< "$staging/seccomp.bpf" || status=$?
+elif [[ -n $command_line ]]; then
+    "${launcher[@]}" bwrap "${bwrap_args[@]}" /bin/bash -c "$command_line" \
+        9< "$staging/seccomp.bpf" || status=$?
+else
+    "${launcher[@]}" bwrap "${bwrap_args[@]}" "$run_path" "$@" \
+        9< "$staging/seccomp.bpf" || status=$?
+fi
+exit $status
