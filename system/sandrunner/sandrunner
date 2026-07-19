@@ -284,7 +284,7 @@ else
     # Only the /etc entries programs commonly need at runtime; the rest of
     # /etc stays invisible.
     for etc_path in ld.so.cache ld.so.conf ld.so.conf.d ssl ca-certificates \
-                    nsswitch.conf localtime; do
+                    nsswitch.conf localtime machine-id; do
         if [[ -e /etc/$etc_path ]]; then
             bwrap_args+=(--ro-bind "/etc/$etc_path" "/etc/$etc_path")
         fi
@@ -330,6 +330,15 @@ if [[ $gui -eq 1 ]]; then
     [[ -d /etc/fonts ]] && bwrap_args+=(--ro-bind /etc/fonts /etc/fonts)
 fi
 
+# GUI apps expect a session D-Bus (tray icons, libdbusmenu, portals probe it
+# and warn loudly without one). Run a PRIVATE bus inside the sandbox — real
+# dbus, empty service list, zero host exposure. Never the host bus: session
+# dbus can screenshot, inject input and start services.
+run_prefix=()
+if [[ $gui -eq 1 && -x /usr/bin/dbus-run-session ]]; then
+    run_prefix=(/usr/bin/dbus-run-session --)
+fi
+
 run_path=
 if [[ -z $target ]]; then
     bwrap_args+=(--chdir /root)
@@ -357,13 +366,13 @@ if [[ $want_shell -eq 1 ]]; then
     if [[ -n $target ]]; then
         echo "sandrunner: target at $run_path" >&2
     fi
-    "${launcher[@]}" bwrap "${bwrap_args[@]}" /bin/bash \
+    "${launcher[@]}" bwrap "${bwrap_args[@]}" "${run_prefix[@]}" /bin/bash \
         9< "$staging/seccomp.bpf" || status=$?
 elif [[ -n $command_line ]]; then
-    "${launcher[@]}" bwrap "${bwrap_args[@]}" /bin/bash -c "$command_line" \
+    "${launcher[@]}" bwrap "${bwrap_args[@]}" "${run_prefix[@]}" /bin/bash -c "$command_line" \
         9< "$staging/seccomp.bpf" || status=$?
 else
-    "${launcher[@]}" bwrap "${bwrap_args[@]}" "$run_path" "$@" \
+    "${launcher[@]}" bwrap "${bwrap_args[@]}" "${run_prefix[@]}" "$run_path" "$@" \
         9< "$staging/seccomp.bpf" || status=$?
 fi
 exit $status

@@ -72,9 +72,12 @@ doesn't exist still errors, so typos aren't silently reinterpreted).
 Non-executable files are run via a `chmod +x` copy automatically. Exit code of
 the sandboxed program is propagated.
 
-Simulation is filesystem-true, not service-true: there is no systemd/dbus
-inside, so e.g. `sandrunner "sudo systemctl stop foo"` fails with a bus error
-rather than simulating the stop. Filesystem-touching commands (`rm`,
+Simulation is filesystem-true, not service-true: there is no systemd or
+SYSTEM bus inside, so e.g. `sandrunner "sudo systemctl stop foo"` fails with
+a bus error rather than simulating the stop. `--gui` runs get a PRIVATE
+session D-Bus (`dbus-run-session`) — real bus, empty service list, never the
+host's (session dbus can screenshot/inject input) — so tray/dbusmenu
+libraries stop erroring. Filesystem-touching commands (`rm`,
 `install`, `cp`, `pacman`, installers, config edits) behave exactly as they
 would on the host — into the throwaway overlay. pacman specifics: snapshot
 pre-hooks (snap-pac/timeshift) are masked and `DownloadUser`/scriptlet
