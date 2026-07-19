@@ -24,25 +24,48 @@ Item {
         }
     }
 
-    readonly property real nonAnimHeight: (content.item as Content)?.nonAnimHeight ?? 0
+    // Compact corner panel: the full dashboard scaled down into the
+    // bottom-left, mirroring the utilities quick menu on the right
+    readonly property real compactScale: 0.8
+    readonly property real nonAnimHeight: ((content.item as Content)?.nonAnimHeight ?? 0) * compactScale
     readonly property bool shouldBeActive: screenState.dashboard && Config.dashboard.enabled
     property real offsetScale: shouldBeActive ? 0 : 1
 
     visible: offsetScale < 1
-    anchors.topMargin: (-implicitHeight - 5) * offsetScale
-    implicitHeight: content.implicitHeight
-    implicitWidth: content.implicitWidth || 854 // Hard coded fallback for first open
+    anchors.bottomMargin: (-implicitHeight - 5) * offsetScale
+    implicitHeight: content.implicitHeight * compactScale
+    implicitWidth: (content.implicitWidth || 854) * compactScale // Hard coded fallback for first open
     opacity: 1 - offsetScale
 
     Behavior on offsetScale {
         Anim {}
     }
 
+    // Panel size only changes when a larger tab loads for the first time;
+    // morph there instead of snapping
+    Behavior on implicitWidth {
+        Anim {}
+    }
+
+    Behavior on implicitHeight {
+        Anim {}
+    }
+
     Loader {
         id: content
 
-        anchors.horizontalCenter: parent.horizontalCenter
+        // Layout geometry stays unscaled; the visual shrinks around the
+        // bottom-left corner to exactly fill the wrapper's scaled size
+        anchors.left: parent.left
         anchors.bottom: parent.bottom
+        scale: root.compactScale
+        transformOrigin: Item.BottomLeft
+        // Natively-rendered glyphs go fuzzy under a plain transform scale;
+        // rasterising the tree at full size and letting the GPU minify it
+        // keeps text edges clean. Only paid while the panel is visible.
+        layer.enabled: root.visible
+        layer.smooth: true
+        layer.mipmap: true
 
         // Preloaded at startup and kept resident: sync-instantiating this
         // tree on open froze the GUI thread mid-entrance (visible jank).

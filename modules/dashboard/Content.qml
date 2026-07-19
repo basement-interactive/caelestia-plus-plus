@@ -8,6 +8,8 @@ import Caelestia
 import Caelestia.Config
 import qs.components
 import qs.components.filedialog
+import qs.utils
+import Quickshell.Io
 
 Item {
     id: root
@@ -90,8 +92,11 @@ Item {
 
             flickableDirection: Flickable.HorizontalFlick
 
-            implicitWidth: currentItem?.implicitWidth ?? 0
-            implicitHeight: currentItem?.implicitHeight ?? 0
+            // Panel size follows the largest pane seen so far, not the
+            // current tab — per-tab implicit sizes differ and letting them
+            // through resized the whole panel on every tab switch
+            implicitWidth: row.maxPaneWidth || (currentItem?.implicitWidth ?? 0)
+            implicitHeight: row.maxPaneHeight || (currentItem?.implicitHeight ?? 0)
 
             contentX: currentItem?.x ?? 0
             contentWidth: row.implicitWidth
@@ -124,6 +129,68 @@ Item {
             RowLayout {
                 id: row
 
+                // Largest pane ever seen; itemAt() isn't notifiable, so
+                // the delegates push their size changes here instead.
+                // Monotonic on purpose: off-screen panes unload and their
+                // implicit size drops to 0 — recomputing a "current" max
+                // shrank the panel on every tab switch and regrew it on
+                // return. Once locked bigger, the panel never shrinks.
+                //
+                // The lock persists across shell restarts: without it every
+                // session started at 0 and the first visit to a wider/taller
+                // tab morphed the panel once per session. Stale after a
+                // config/font change that shrinks panes — delete the state
+                // file to re-measure.
+                property real maxPaneWidth
+                property real maxPaneHeight
+                property bool seeded: false
+
+                // Called before the first write can happen: the Repeater
+                // populates during creation, so no object-lifecycle hook on
+                // a sibling runs early enough — the first pane's write used
+                // to clobber the persisted lock before an async load could
+                // seed it. Blocking on the read here closes that race.
+                function seed(): void {
+                    if (seeded)
+                        return;
+                    seeded = true;
+                    sizeStore.reload();
+                    sizeStore.waitForJob();
+                    let saved;
+                    try {
+                        saved = JSON.parse(sizeStore.text());
+                    } catch (e) {
+                        return;
+                    }
+                    maxPaneWidth = Math.max(maxPaneWidth, saved.paneWidth ?? 0);
+                    maxPaneHeight = Math.max(maxPaneHeight, saved.paneHeight ?? 0);
+                }
+
+                function updateMaxPaneSize(): void {
+                    seed();
+                    let w = maxPaneWidth;
+                    let h = maxPaneHeight;
+                    for (let i = 0; i < repeater.count; i++) {
+                        const pane = repeater.itemAt(i);
+                        if (pane) {
+                            w = Math.max(w, pane.implicitWidth);
+                            h = Math.max(h, pane.implicitHeight);
+                        }
+                    }
+                    if (w === maxPaneWidth && h === maxPaneHeight)
+                        return;
+                    maxPaneWidth = w;
+                    maxPaneHeight = h;
+                    sizeStore.setText(JSON.stringify({paneWidth: w, paneHeight: h}) + "\n");
+                }
+
+                FileView {
+                    id: sizeStore
+
+                    path: `${Paths.state}/dashboard-size.json`
+                    printErrors: false
+                }
+
                 Repeater {
                     id: repeater
 
@@ -138,8 +205,16 @@ Item {
                         required property var modelData
 
                         Layout.alignment: Qt.AlignTop
+                        // Uniform slots: every pane gets the full locked
+                        // panel size — a smaller pane would otherwise show
+                        // the next pane bleeding in at the right edge and
+                        // leave a gap below itself
+                        Layout.preferredWidth: row.maxPaneWidth || implicitWidth
+                        Layout.preferredHeight: row.maxPaneHeight || implicitHeight
 
                         sourceComponent: modelData.component
+                        onImplicitWidthChanged: row.updateMaxPaneSize()
+                        onImplicitHeightChanged: row.updateMaxPaneSize()
 
                         Component.onCompleted: active = Qt.binding(() => {
                             if (index === view.currentIndex)

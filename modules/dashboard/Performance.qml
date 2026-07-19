@@ -52,6 +52,9 @@ Item {
 
         anchors.left: parent.left
         anchors.right: parent.right
+        // Panel height is locked to the tallest tab; center instead of
+        // leaving the slack as a dead band under the cards
+        anchors.verticalCenter: parent.verticalCenter
         spacing: Tokens.spacing.medium
         visible: !placeholder.active
 

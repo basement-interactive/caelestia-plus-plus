@@ -9,19 +9,23 @@ Item {
 
     readonly property var today: Weather.forecast && Weather.forecast.length > 0 ? Weather.forecast[0] : null
 
-    implicitWidth: layout.implicitWidth > 800 ? layout.implicitWidth : 840
-    implicitHeight: layout.implicitHeight
+    implicitWidth: Math.max(layout.implicitWidth, 840) + layout.anchors.margins * 2
+    implicitHeight: layout.implicitHeight + layout.anchors.margins + layout.anchors.bottomMargin
     Component.onCompleted: Weather.reload()
 
     ColumnLayout {
         id: layout
 
         anchors.fill: parent
+        // Uniform frame; bottom sits optically heavier so the forecast
+        // temps don't read as touching the panel edge
+        anchors.margins: Tokens.padding.large
+        anchors.bottomMargin: Tokens.padding.extraLarge
         spacing: Tokens.spacing.medium
 
         RowLayout {
-            Layout.leftMargin: Tokens.padding.large
-            Layout.rightMargin: Tokens.padding.large
+            Layout.leftMargin: Tokens.padding.small
+            Layout.rightMargin: Tokens.padding.small
             Layout.fillWidth: true
 
             Column {
@@ -63,25 +67,13 @@ Item {
             }
         }
 
-        StyledRect {
+        Card {
             Layout.fillWidth: true
             implicitHeight: bigInfoRow.implicitHeight + Tokens.padding.small
 
             radius: Tokens.rounding.extraLarge * 2
-            color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
-            border.width: 1
-            border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
 
-            Behavior on border.color {
-                CAnim {}
-            }
 
-            StyledRect {
-                anchors.fill: parent
-                anchors.margins: Tokens.padding.extraSmall
-                radius: Math.max(0, parent.radius - anchors.margins)
-                color: Colours.tPalette.m3surfaceContainer
-            }
 
             RowLayout {
                 id: bigInfoRow
@@ -159,7 +151,7 @@ Item {
 
                 model: Weather.forecast
 
-                StyledRect {
+                Card {
                     id: forecastItem
 
                     required property int index
@@ -171,18 +163,12 @@ Item {
                     property real revealOffset: Tokens.padding.large
 
                     radius: Tokens.rounding.large
-                    color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
-                    border.width: 1
-                    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
                     opacity: 0
 
                     transform: Translate {
                         y: forecastItem.revealOffset
                     }
 
-                    Behavior on border.color {
-                        CAnim {}
-                    }
 
                     SequentialAnimation {
                         running: true
@@ -206,12 +192,6 @@ Item {
                         }
                     }
 
-                    StyledRect {
-                        anchors.fill: parent
-                        anchors.margins: Tokens.padding.extraSmall
-                        radius: Math.max(0, parent.radius - anchors.margins)
-                        color: Colours.tPalette.m3surfaceContainer
-                    }
 
                     ColumnLayout {
                         id: forecastItemColumn
@@ -258,7 +238,7 @@ Item {
         }
     }
 
-    component DetailCard: StyledRect {
+    component DetailCard: Card {
         id: detailRoot
 
         property string icon
@@ -268,21 +248,9 @@ Item {
 
         Layout.fillWidth: true
         Layout.preferredHeight: 60
-        radius: Tokens.rounding.medium
-        color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
-        border.width: 1
-        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+        radius: Tokens.rounding.large
 
-        Behavior on border.color {
-            CAnim {}
-        }
 
-        StyledRect {
-            anchors.fill: parent
-            anchors.margins: Tokens.padding.extraSmall
-            radius: Math.max(0, parent.radius - anchors.margins)
-            color: Colours.tPalette.m3surfaceContainer
-        }
 
         Row {
             anchors.centerIn: parent

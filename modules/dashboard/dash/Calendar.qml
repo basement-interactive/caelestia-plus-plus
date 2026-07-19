@@ -32,8 +32,7 @@ CustomMouseArea {
             screenState.dashboardDate = new Date(nonAnimCurrYear, nonAnimCurrMonth + 1, 1);
     }
 
-    anchors.left: parent.left
-    anchors.right: parent.right
+    anchors.fill: parent
     implicitHeight: inner.implicitHeight + inner.anchors.margins * 2
 
     acceptedButtons: Qt.MiddleButton
@@ -184,6 +183,9 @@ CustomMouseArea {
 
         Item {
             Layout.fillWidth: true
+            // Soak up the card's extra height so the month rows breathe
+            // instead of clumping at the top of the stretched card
+            Layout.fillHeight: true
             implicitHeight: grid.implicitHeight
 
             opacity: root.animOpacity

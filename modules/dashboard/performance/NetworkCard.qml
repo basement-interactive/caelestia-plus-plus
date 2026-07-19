@@ -6,27 +6,14 @@ import qs.components
 import qs.components.misc
 import qs.services
 
-StyledRect {
+Card {
     id: root
 
-    color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
-    border.width: 1
-    border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
-    radius: Tokens.rounding.extraLarge
 
     implicitWidth: Tokens.sizes.dashboard.perfNetworkCardWidth
     implicitHeight: Tokens.sizes.dashboard.perfNetworkCardHeight
 
-    Behavior on border.color {
-        CAnim {}
-    }
 
-    StyledRect {
-        anchors.fill: parent
-        anchors.margins: Tokens.padding.extraSmall
-        radius: Math.max(0, root.radius - anchors.margins)
-        color: Colours.tPalette.m3surfaceContainer
-    }
 
     Ref {
         service: NetworkUsage

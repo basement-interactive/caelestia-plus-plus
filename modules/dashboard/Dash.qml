@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import "dash"
 import QtQuick
 import QtQuick.Layouts
@@ -6,45 +8,62 @@ import qs.components
 import qs.components.filedialog
 import qs.services
 
+// Bento grid: two full-height pillars (clock+weather left, media right)
+// framing a center column of user card over calendar and resource gauges.
+// Every card stretches to the panel's locked size — no ragged edges.
 GridLayout {
     id: root
 
     required property ScreenState screenState
     required property FileDialog facePicker
 
+    // Cards replay their entrance every time the dashboard opens: this pane
+    // is preloaded at startup, so a run-once animation would play unseen
+    readonly property bool revealed: screenState.dashboard
+
     rowSpacing: Tokens.spacing.medium
     columnSpacing: Tokens.spacing.medium
 
     Rect {
-        stagger: 1
+        stagger: 0
 
-        Layout.column: 2
-        Layout.columnSpan: 3
-        Layout.preferredWidth: Tokens.sizes.dashboard.userWidth
+        Layout.row: 0
+        Layout.column: 0
+        Layout.rowSpan: 2
+        Layout.preferredWidth: Tokens.sizes.dashboard.mediaWidth
         Layout.fillHeight: true
 
-        radius: Tokens.rounding.extraLarge
+        radius: Tokens.rounding.extraLarge * 2
+
+        NowCard {}
+    }
+
+    Rect {
+        stagger: 1
+
+        Layout.row: 0
+        Layout.column: 1
+        Layout.columnSpan: 2
+        Layout.fillWidth: true
+        // Fixed header band; the avatar and badges inside anchor-fill it
+        Layout.preferredHeight: 116
 
         User {
-            id: user
-
             screenState: root.screenState
             facePicker: root.facePicker
         }
     }
 
     Rect {
-        stagger: 0
+        stagger: 2
 
-        Layout.row: 0
-        Layout.columnSpan: 2
-        Layout.preferredWidth: Tokens.sizes.dashboard.weatherWidth
-        Layout.preferredHeight: weather.implicitHeight
+        Layout.row: 1
+        Layout.column: 1
+        Layout.fillWidth: true
+        Layout.fillHeight: true
 
-        radius: Tokens.rounding.extraLarge * 1.5
-
-        SmallWeather {
-            id: weather
+        Calendar {
+            screenState: root.screenState
         }
     }
 
@@ -52,43 +71,9 @@ GridLayout {
         stagger: 3
 
         Layout.row: 1
-        Layout.preferredWidth: dateTime.implicitWidth
-        Layout.fillHeight: true
-
-        radius: Tokens.rounding.large
-
-        DateTime {
-            id: dateTime
-        }
-    }
-
-    Rect {
-        stagger: 4
-
-        Layout.row: 1
-        Layout.column: 1
-        Layout.columnSpan: 3
-        Layout.fillWidth: true
-        Layout.preferredHeight: calendar.implicitHeight
-
-        radius: Tokens.rounding.extraLarge
-
-        Calendar {
-            id: calendar
-
-            screenState: root.screenState
-        }
-    }
-
-    Rect {
-        stagger: 5
-
-        Layout.row: 1
-        Layout.column: 4
+        Layout.column: 2
         Layout.preferredWidth: resources.implicitWidth
         Layout.fillHeight: true
-
-        radius: Tokens.rounding.large
 
         Resources {
             id: resources
@@ -96,10 +81,10 @@ GridLayout {
     }
 
     Rect {
-        stagger: 2
+        stagger: 4
 
         Layout.row: 0
-        Layout.column: 5
+        Layout.column: 3
         Layout.rowSpan: 2
         Layout.preferredWidth: media.implicitWidth
         Layout.fillHeight: true
@@ -111,37 +96,41 @@ GridLayout {
         }
     }
 
-    component Rect: StyledRect {
+    component Rect: Card {
         id: card
 
         property int stagger: 0
         property real revealOffset: Tokens.padding.large
-
-        color: Qt.alpha(Colours.palette.m3surfaceContainerLowest, 0.7)
-        border.width: 1
-        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
+        readonly property bool revealed: root.revealed
 
         opacity: 0
+        scale: 0.96
         transform: Translate {
             y: card.revealOffset
         }
 
-        Behavior on border.color {
-            CAnim {}
+        onRevealedChanged: {
+            if (revealed) {
+                reveal.restart();
+            } else {
+                reveal.stop();
+                opacity = 0;
+                scale = 0.96;
+                revealOffset = Tokens.padding.large;
+            }
         }
-
-        StyledRect {
-            anchors.fill: parent
-            anchors.margins: Tokens.padding.extraSmall
-            radius: Math.max(0, card.radius - anchors.margins)
-            color: Colours.tPalette.m3surfaceContainer
+        Component.onCompleted: {
+            if (revealed)
+                reveal.restart();
         }
 
         SequentialAnimation {
-            running: true
+            id: reveal
 
             PauseAnimation {
-                duration: card.stagger * 40
+                // Base delay lets the drawer slide-in land first, so the
+                // cascade is actually seen instead of playing off-screen
+                duration: 150 + card.stagger * 60
             }
             ParallelAnimation {
                 Anim {
@@ -149,6 +138,12 @@ GridLayout {
                     property: "opacity"
                     to: 1
                     type: Anim.DefaultEffects
+                }
+                Anim {
+                    target: card
+                    property: "scale"
+                    to: 1
+                    type: Anim.DefaultSpatial
                 }
                 Anim {
                     target: card
