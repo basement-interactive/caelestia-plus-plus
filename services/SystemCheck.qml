@@ -291,6 +291,18 @@ Singleton {
             push("sandrunner", qsTr("sandrunner linked but ~/.local/bin not on PATH"), qsTr("The symlink exists but your shell PATH skips ~/.local/bin — add it in your shell profile; needs a manual edit"), "info");
         else
             push("sandrunner", qsTr("sandrunner installed"), qsTr("Full-simulation sandbox available as `sandrunner FILE`"), "ok");
+        // hallucinate: same user-level symlink model. Its one extra dep (tk)
+        // rides a prompt row so a missing Tk raises the startup SetupPrompt.
+        const [hlLink, hlTk] = flags.hallucinate ?? [];
+        if (hlLink !== "ok")
+            Quickshell.execDetached(["sh", "-c", `mkdir -p "$HOME/.local/bin" && ln -sf '${Quickshell.shellDir}/system/hallucinate/hallucinate' "$HOME/.local/bin/hallucinate"`]);
+        if (hlTk === "missing")
+            push("hallucinate", qsTr("hallucinate needs Tkinter"), qsTr("The AI-hallucinated app command needs the tk package to draw its window"), "warn", {
+                prompt: true,
+                fix: Object.assign({label: qsTr("Install"), pkg: "tk"}, _pacmanFix(qsTr("Installs the tk package (Tkinter's native library). Nothing is removed."), ["pacman -S --needed --noconfirm tk"]))
+            });
+        else
+            push("hallucinate", qsTr("hallucinate installed"), qsTr("AI-hallucinated one-shot apps via `hallucinate \"…\"`"), "ok");
 
         for (const c of cfgs)
             push(`cfg-${c.file}`, c.ok ? qsTr("Config valid: %1").arg(c.file.split("/").pop()) : qsTr("Config is not valid JSON: %1").arg(c.file.split("/").pop()), c.ok ? c.file : qsTr("%1 — the shell falls back to defaults while this file is broken").arg(c.file), c.ok ? "ok" : "fail", c.ok ? null : {
