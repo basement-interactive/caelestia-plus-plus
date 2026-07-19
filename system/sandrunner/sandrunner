@@ -189,6 +189,10 @@ bwrap_args=(
     --ro-bind "$staging/passwd" /etc/passwd
     --ro-bind "$staging/group" /etc/group
 )
+# /opt read-only alongside /usr: system-installed software (spotify, chrome,
+# …) lives there and /usr wrapper scripts exec into it. Same trust level as
+# /usr, still unwritable even to "root".
+[[ -d /opt ]] && bwrap_args+=(--ro-bind /opt /opt)
 
 # Only the /etc entries programs commonly need at runtime; the rest of /etc
 # stays invisible.

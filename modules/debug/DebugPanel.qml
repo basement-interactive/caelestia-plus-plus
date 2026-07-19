@@ -605,8 +605,15 @@ Scope {
                                 StyledText {
                                     anchors.centerIn: parent
                                     visible: fixLogView.count === 0
-                                    text: SystemCheck.runningFixRoot ? qsTr("Waiting for the password prompt…") : qsTr("Starting…")
-                                    color: Colours.palette.m3outline
+                                    // A fix that produced no output must still report
+                                    // its ending — without this the label reads
+                                    // "Starting…" forever after a silent fix finishes
+                                    text: {
+                                        if (SystemCheck.fixResult !== null)
+                                            return SystemCheck.fixResult.success ? qsTr("Done — the fix finished with no output") : qsTr("Failed (code %1) — no output produced").arg(SystemCheck.fixResult.code);
+                                        return SystemCheck.runningFixRoot ? qsTr("Waiting for the password prompt…") : qsTr("Starting…");
+                                    }
+                                    color: SystemCheck.fixResult === null ? Colours.palette.m3outline : SystemCheck.fixResult.success ? "#4bd97b" : "#ff5c5c"
                                     font: Tokens.font.body.medium
                                 }
                             }

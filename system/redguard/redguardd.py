@@ -284,7 +284,7 @@ class Redguard:
     # -- classification ----------------------------------------------------- #
     def classify(self, pid: int) -> dict | None:
         """Return a detection dict for pid, or None if it looks benign.
-        Called with the process already frozen by the pre-filter."""
+        Reads /proc only — safe to call on a running (unfrozen) process."""
         comm = _comm(pid)
         exe, deleted = _exe(pid)
         is_interp = comm in INTERPRETERS or Path(exe).name in INTERPRETERS
@@ -327,12 +327,23 @@ class Redguard:
                                        "kind": "blocked", "detail": f"auto-blocked {exe}"})
             return
 
-        # Freeze first (minimise the window), then classify at leisure.
+        # Classify BEFORE freezing: SIGSTOP on a foreground job makes the
+        # user's shell reclaim the terminal ("suspended (signal)") even when
+        # SIGCONT follows within milliseconds — and the interpreter pre-filter
+        # covers every /usr/bin wrapper script. Benign execs (the overwhelming
+        # majority) must never be signalled at all; a real payload runs a few
+        # extra ms before the freeze, which the kill/ask flow still contains.
+        detection = self.classify(pid)
+        if detection is None:
+            return
+
+        # Detection: freeze now, then re-classify — the process ran unfrozen
+        # and may have exited or exec'd into something else meanwhile.
         if not self._stop(pid):
             return
         detection = self.classify(pid)
         if detection is None:
-            self._cont(pid)  # benign interpreter/terminal: release instantly
+            self._cont(pid)
             return
 
         # Fail open: nobody to ask -> release and log rather than hang forever.

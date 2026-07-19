@@ -7,7 +7,7 @@
 # the shell on first enable, so it works non-interactively on any machine.
 set -euo pipefail
 
-root_half_version=1
+root_half_version=2
 
 if [[ $EUID -ne 0 ]]; then
     echo "Run as root: sudo $0" >&2

@@ -29,9 +29,11 @@ alone would be a false-positive machine.
 ```
 exec()  ->  kernel netlink proc-connector (real time, no polling)
         ->  pre-filter: interpreter, or exe in scratch/deleted?  no -> ignore
-        ->  SIGSTOP (freeze) -> classify from /proc
-              benign        -> SIGCONT (released instantly)
-              detection     -> prompt the bar (allow / block / once)
+        ->  classify from /proc (unfrozen: benign execs are never signalled,
+              so foreground shell jobs keep their terminal)
+              benign        -> ignore
+              detection     -> SIGSTOP (freeze) -> re-classify -> prompt the
+                               bar (allow / block / once)
         verdict  ->  allow: SIGCONT   block: SIGKILL (group)   once: SIGCONT
                      allow/block remembered per-executable, persisted
 ```
