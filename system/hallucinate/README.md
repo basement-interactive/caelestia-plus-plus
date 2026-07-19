@@ -76,9 +76,12 @@ install -m600 /dev/stdin ~/.config/caelestia/gemini.key <<<'YOUR_GEMINI_KEY'
 
 ## Config
 
-- `HALLUCINATE_MODEL` — overrides the model (default `gemini-flash-latest`, an
-  alias that tracks the current flash release so it survives version retirement;
-  `gemini-2.5-flash` and friends are already 404 for new keys).
+- `HALLUCINATE_MODEL` — overrides the model (default `gemini-flash-lite-latest`).
+  Lite is used on purpose: it honours `thinkingBudget: 0` so there is zero
+  thinking latency (~2-3s/turn). The non-lite `gemini-flash-latest` is a
+  thinking model that ignores the budget — it stalls for tens of seconds and
+  returns truncated UIs (a calculator with no buttons). `gemini-2.5-flash` and
+  friends are already 404 for new keys, so pinning a version is avoided.
 - `hallucinate --dry-run "concept"` — print the initial UI spec as JSON and
   exit, no window (handy for debugging / headless checks).
 

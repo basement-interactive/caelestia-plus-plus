@@ -34,7 +34,11 @@ import urllib.request
 # ~/.config/caelestia/gemini.key. The model is an alias tracking the current
 # flash release, so it survives individual versions being retired.
 KEY_FILE = os.path.expanduser("~/.config/caelestia/gemini.key")
-DEFAULT_MODEL = "gemini-flash-latest"
+# flash-LITE honours thinkingBudget:0 (thoughts=0 -> fast, ~2-3s). The plain
+# flash alias is a thinking model that ignores the budget, thinks for tens of
+# seconds and returns truncated specs (a calculator with no buttons). Lite is
+# both faster and more reliable for this constrained schema.
+DEFAULT_MODEL = "gemini-flash-lite-latest"
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 # The widget vocabulary the model is allowed to use. Small on purpose: a narrow
