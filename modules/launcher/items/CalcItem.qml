@@ -6,82 +6,34 @@ import Caelestia.Config
 import qs.components
 import qs.services
 
-Item {
+LauncherItem {
     id: root
 
-    required property var list
-    required property int index
     readonly property string math: list.search.text.slice(`${GlobalConfig.launcher.actionPrefix}calc `.length)
-
-    function onClicked(): void {
-        Quickshell.execDetached(["wl-copy", Qalculator.rawResult]);
-        root.list.screenState.launcher = false;
-    }
 
     onMathChanged: {
         if (math.length > 0)
             Qalculator.evalAsync(math);
     }
 
-    implicitHeight: Tokens.sizes.launcher.itemHeight
-
-    anchors.left: parent?.left
-    anchors.right: parent?.right
-
-    opacity: 0
-    scale: pressLayer.pressed ? 0.97 : 1
-    transform: Translate {
-        id: enterSlide
-
-        y: root.Tokens.padding.large
-    }
-
-    SequentialAnimation {
-        running: true
-
-        PauseAnimation {
-            duration: Math.min(root.index, 10) * 30
-        }
-        ParallelAnimation {
-            Anim {
-                target: root
-                property: "opacity"
-                to: 1
-                type: Anim.DefaultEffects
-            }
-            Anim {
-                target: enterSlide
-                property: "y"
-                to: 0
-                type: Anim.DefaultSpatial
-            }
-        }
-    }
-
-    Behavior on scale {
-        Anim {
-            type: pressLayer.pressed ? Anim.FastSpatial : Anim.Emphasized
-        }
-    }
-
-    StateLayer {
-        id: pressLayer
-
-        radius: Tokens.rounding.large
-        onClicked: root.onClicked()
+    onTriggered: {
+        Quickshell.execDetached(["wl-copy", Qalculator.rawResult]);
+        list.screenState.launcher = false;
     }
 
     RowLayout {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.margins: Tokens.padding.medium
 
         spacing: Tokens.spacing.medium
 
-        MaterialIcon {
-            text: "function"
-            fontStyle: Tokens.font.icon.extraLarge
+        Tile {
+            icon: "function"
+
+            // RowLayout ignores the anchored-to-parent sizing Tile defaults to
+            anchors.verticalCenter: undefined
+            implicitHeight: root.height - Tokens.padding.small * 2
             Layout.alignment: Qt.AlignVCenter
         }
 
@@ -97,6 +49,7 @@ Item {
             }
 
             text: root.math.length > 0 ? (Qalculator.result || qsTr("Calculating...")) : qsTr("Type an expression to calculate")
+            font: Tokens.font.body.medium
             elide: Text.ElideLeft
 
             Layout.fillWidth: true

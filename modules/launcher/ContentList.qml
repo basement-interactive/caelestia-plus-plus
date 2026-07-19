@@ -20,6 +20,8 @@ Item {
 
     readonly property bool showWallpapers: search.text.startsWith(`${GlobalConfig.launcher.actionPrefix}wallpaper `)
     readonly property var currentList: showWallpapers ? wallpaperList.item : appList.item // Can be either ListView or PathView, so can't type properly
+    readonly property string mode: showWallpapers ? "wallpapers" : (appList.item?.state ?? "apps")
+    readonly property int resultCount: currentList?.count ?? 0
     property string animState: showWallpapers ? "wallpapers" : "apps"
 
     anchors.horizontalCenter: parent.horizontalCenter

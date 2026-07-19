@@ -4,114 +4,51 @@ import qs.components
 import qs.services
 import qs.modules.launcher.services
 
-Item {
+LauncherItem {
     id: root
 
     required property M3Variants.Variant modelData
-    required property var list
-    required property int index
 
-    implicitHeight: Tokens.sizes.launcher.itemHeight
+    onTriggered: modelData?.onClicked(list)
 
-    anchors.left: parent?.left
-    anchors.right: parent?.right
+    Tile {
+        id: tile
 
-    opacity: 0
-    scale: pressLayer.pressed ? 0.97 : 1
-    transform: Translate {
-        id: enterSlide
-
-        y: root.Tokens.padding.large
+        icon: root.modelData?.icon ?? ""
     }
 
-    SequentialAnimation {
-        running: true
+    Column {
+        anchors.left: tile.right
+        anchors.leftMargin: Tokens.spacing.medium
+        anchors.right: parent.right
+        anchors.rightMargin: current.visible ? current.implicitWidth + Tokens.spacing.medium : 0
+        anchors.verticalCenter: parent.verticalCenter
 
-        PauseAnimation {
-            duration: Math.min(root.index, 10) * 30
+        StyledText {
+            width: parent.width
+            text: root.modelData?.name ?? ""
+            font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
+            elide: Text.ElideRight
         }
-        ParallelAnimation {
-            Anim {
-                target: root
-                property: "opacity"
-                to: 1
-                type: Anim.DefaultEffects
-            }
-            Anim {
-                target: enterSlide
-                property: "y"
-                to: 0
-                type: Anim.DefaultSpatial
-            }
+
+        StyledText {
+            width: parent.width
+            text: root.modelData?.description ?? ""
+            font: Tokens.font.body.small
+            color: Colours.palette.m3outline
+            elide: Text.ElideRight
         }
     }
 
-    Behavior on scale {
-        Anim {
-            type: pressLayer.pressed ? Anim.FastSpatial : Anim.Emphasized
-        }
-    }
+    MaterialIcon {
+        id: current
 
-    StateLayer {
-        id: pressLayer
+        visible: root.modelData?.variant === Schemes.currentVariant
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
 
-        radius: Tokens.rounding.large
-        onClicked: root.modelData?.onClicked(root.list)
-    }
-
-    Item {
-        anchors.fill: parent
-        anchors.leftMargin: Tokens.padding.medium
-        anchors.rightMargin: Tokens.padding.medium
-        anchors.margins: Tokens.padding.small
-
-        MaterialIcon {
-            id: icon
-
-            text: root.modelData?.icon ?? ""
-            fontStyle: Tokens.font.icon.extraLarge
-
-            anchors.verticalCenter: parent.verticalCenter
-        }
-
-        Column {
-            anchors.left: icon.right
-            anchors.leftMargin: Tokens.spacing.large
-            anchors.verticalCenter: icon.verticalCenter
-
-            width: parent.width - icon.width - anchors.leftMargin - (current.active ? current.width + Tokens.spacing.medium : 0)
-            spacing: 0
-
-            StyledText {
-                text: root.modelData?.name ?? ""
-                font: Tokens.font.body.medium
-            }
-
-            StyledText {
-                text: root.modelData?.description ?? ""
-                font: Tokens.font.body.small
-                color: Colours.palette.m3outline
-
-                elide: Text.ElideRight
-                anchors.left: parent.left
-                anchors.right: parent.right
-            }
-        }
-
-        Loader {
-            id: current
-
-            asynchronous: true
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-
-            active: root.modelData?.variant === Schemes.currentVariant
-
-            sourceComponent: MaterialIcon {
-                text: "check"
-                color: Colours.palette.m3onSurfaceVariant
-                fontStyle: Tokens.font.icon.large
-            }
-        }
+        text: "check"
+        color: Colours.palette.m3primary
+        fontStyle: Tokens.font.icon.large
     }
 }

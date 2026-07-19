@@ -16,6 +16,32 @@ StyledListView {
     required property SearchBar search
     required property ScreenState screenState
 
+    // True while the launcher is opening: rows replay their staggered
+    // entrance. Cleared shortly after so refiltering while typing creates
+    // rows without animation churn.
+    property bool revealing
+
+    Connections {
+        target: root.screenState
+
+        function onLauncherChanged(): void {
+            if (root.screenState.launcher) {
+                root.revealing = true;
+                revealTimer.restart();
+            } else {
+                root.revealing = false;
+                revealTimer.stop();
+            }
+        }
+    }
+
+    Timer {
+        id: revealTimer
+
+        interval: 400
+        onTriggered: root.revealing = false
+    }
+
     model: ScriptModel {
         id: model
 
@@ -31,18 +57,33 @@ StyledListView {
     highlightRangeMode: ListView.ApplyRange
 
     highlightFollowsCurrentItem: false
-    highlight: StyledRect {
-        radius: Tokens.rounding.large
-        color: Qt.alpha(Colours.palette.m3onSurface, 0.08)
-        border.width: 1
-        border.color: Qt.alpha(Colours.palette.m3outlineVariant, 0.4)
-
+    highlight: Item {
         y: root.currentItem?.y ?? 0
         implicitWidth: root.width
         implicitHeight: root.currentItem?.implicitHeight ?? 0
 
         Behavior on y {
             Anim {}
+        }
+
+        StyledRect {
+            anchors.fill: parent
+
+            radius: Tokens.rounding.large
+            color: Qt.alpha(Colours.palette.m3primary, 0.08)
+            border.width: 1
+            border.color: Qt.alpha(Colours.palette.m3primary, 0.2)
+        }
+
+        StyledRect {
+            anchors.left: parent.left
+            anchors.leftMargin: Tokens.padding.extraSmall
+            anchors.verticalCenter: parent.verticalCenter
+
+            implicitWidth: 4
+            implicitHeight: Math.round(parent.height * 0.42)
+            radius: Tokens.rounding.full
+            color: Colours.palette.m3primary
         }
     }
 
@@ -222,7 +263,7 @@ StyledListView {
         id: appItem
 
         AppItem {
-            screenState: root.screenState
+            list: root
         }
     }
 

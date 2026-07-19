@@ -18,6 +18,7 @@ Item {
 
     readonly property int padding: Tokens.padding.large
     readonly property int rounding: Tokens.rounding.extraLarge
+    readonly property int inset: Tokens.padding.small
 
     implicitWidth: listWrapper.width + padding * 2
     implicitHeight: search.height + listWrapper.height + padding + search.anchors.bottomMargin
@@ -25,8 +26,8 @@ Item {
     Item {
         id: listWrapper
 
-        implicitWidth: list.width
-        implicitHeight: list.height + root.padding
+        implicitWidth: list.implicitWidth + root.inset * 2
+        implicitHeight: header.anchors.topMargin + header.implicitHeight + Tokens.padding.small + list.height + root.inset
 
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: search.top
@@ -37,8 +38,7 @@ Item {
         }
 
         StyledRect {
-            anchors.fill: list
-            anchors.margins: -Tokens.padding.small
+            anchors.fill: parent
 
             radius: root.rounding
             color: Qt.alpha(Colours.palette.m3surfaceContainer, 0.7)
@@ -54,13 +54,31 @@ Item {
             }
         }
 
+        Header {
+            id: header
+
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.topMargin: root.inset + Tokens.padding.small
+            anchors.leftMargin: root.inset + Tokens.padding.medium
+            anchors.rightMargin: root.inset + Tokens.padding.medium
+
+            mode: list.mode
+            count: list.resultCount
+        }
+
         ContentList {
             id: list
+
+            anchors.leftMargin: root.inset
+            anchors.rightMargin: root.inset
+            anchors.bottomMargin: root.inset
 
             content: root
             screenState: root.screenState
             panels: root.panels
-            maxHeight: root.maxHeight - search.implicitHeight - root.padding * 3
+            maxHeight: root.maxHeight - search.implicitHeight - root.padding * 3 - header.implicitHeight - Tokens.padding.small * 2
             search: search
             padding: root.padding
             rounding: root.rounding
@@ -154,5 +172,25 @@ Item {
 
             target: root.screenState
         }
+    }
+
+    // Search icon follows the active mode: mode glyph in primary while a
+    // command prefix is active, plain search otherwise.
+    Binding {
+        target: search.searchIcon
+        property: "animate"
+        value: true
+    }
+
+    Binding {
+        target: search.searchIcon
+        property: "text"
+        value: list.mode === "apps" ? "search" : header.info.icon
+    }
+
+    Binding {
+        target: search.searchIcon
+        property: "color"
+        value: list.mode === "apps" ? Colours.palette.m3onSurfaceVariant : Colours.palette.m3primary
     }
 }
