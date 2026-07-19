@@ -85,7 +85,9 @@ Singleton {
         {bin: "brightnessctl", pkg: "brightnessctl", why: qsTr("Brightness control for the internal display"), severity: "warn", laptopOnly: true},
         {bin: "gpu-screen-recorder", pkg: "gpu-screen-recorder", why: qsTr("Screen recording from the utilities drawer"), severity: "warn"},
         {bin: "swappy", pkg: "swappy", why: qsTr("Screenshot annotation"), severity: "warn"},
-        {bin: "xmllint", pkg: "libxml2", why: qsTr("Weather and metadata parsing"), severity: "warn"}
+        {bin: "xmllint", pkg: "libxml2", why: qsTr("Weather and metadata parsing"), severity: "warn"},
+        {bin: "bwrap", pkg: "bubblewrap", why: qsTr("sandrunner: the fake-root sandbox itself"), severity: "warn"},
+        {bin: "fuse-overlayfs", pkg: "fuse-overlayfs", why: qsTr("sandrunner: writable throwaway system view (read-only fallback without it)"), severity: "warn"}
     ]
 
     function scan(): void {
@@ -274,17 +276,18 @@ Singleton {
                 push(`roothalf-${h.dir}`, qsTr("%1 root half installed and current").arg(h.name), qsTr("Feature fully available"), "ok");
         }
         // sandrunner has no privileged half — "installed" is a ~/.local/bin
-        // symlink into the checkout (updates then arrive with git pull for free)
-        const [srLink, srBwrap, srPath, srFuse] = flags.sandrunner ?? [];
-        if (srBwrap === "missing" || srFuse === "missing")
-            push("sandrunner", qsTr("sandrunner runtime incomplete"), srBwrap === "missing" ? qsTr("The fake-root sandbox needs bubblewrap (and fuse-overlayfs for full write simulation)") : qsTr("Without fuse-overlayfs the sandbox is read-only — installs and config edits cannot be simulated"), "warn", {
-                fix: Object.assign({label: qsTr("Install")}, _pacmanFix(qsTr("Installs bubblewrap and fuse-overlayfs. Nothing else is touched."), ["pacman -S --needed --noconfirm bubblewrap fuse-overlayfs"]))
-            });
-        else if (srLink !== "ok")
-            push("sandrunner", qsTr("sandrunner not on PATH"), qsTr("The sandbox script ships in the checkout but has no ~/.local/bin symlink, so `sandrunner FILE` won't resolve"), "warn", {
-                fix: Object.assign({label: qsTr("Link")}, _userFix(qsTr("Creates ~/.local/bin (if needed) and symlinks the checkout's sandrunner script into it. Updates then track the checkout automatically."), ["mkdir -p \"$HOME/.local/bin\"", `ln -sf '${Quickshell.shellDir}/system/sandrunner/sandrunner' "$HOME/.local/bin/sandrunner"`]))
-            });
-        else if (srPath === "missing")
+        // symlink into the checkout. Its packages (bubblewrap, fuse-overlayfs)
+        // ride the binaries list above, so missing ones raise the startup
+        // prompt like any other shell dependency.
+        const [srLink, srPath] = flags.sandrunner ?? [];
+        if (srLink !== "ok") {
+            // Complete our own install silently: the link is user-level,
+            // idempotent and points into the checkout — updates delivered by
+            // git pull alone never run the installer and would leave the
+            // command missing forever.
+            Quickshell.execDetached(["sh", "-c", `mkdir -p "$HOME/.local/bin" && ln -sf '${Quickshell.shellDir}/system/sandrunner/sandrunner' "$HOME/.local/bin/sandrunner"`]);
+            push("sandrunner", qsTr("sandrunner PATH link restored"), qsTr("The ~/.local/bin symlink was missing and has been recreated"), "info");
+        } else if (srPath === "missing")
             push("sandrunner", qsTr("sandrunner linked but ~/.local/bin not on PATH"), qsTr("The symlink exists but your shell PATH skips ~/.local/bin — add it in your shell profile; needs a manual edit"), "info");
         else
             push("sandrunner", qsTr("sandrunner installed"), qsTr("Full-simulation sandbox available as `sandrunner FILE`"), "ok");

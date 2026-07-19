@@ -42,13 +42,12 @@ echo "ver|redguard|$rrepo|$rinst|$ren"
 echo "gitdirty|$(git -C "$SHELLDIR" status --porcelain 2>/dev/null | grep -c .)"
 
 # sandrunner is user-level (no root half): a symlink in ~/.local/bin is the
-# whole install. Also report bwrap presence and whether ~/.local/bin is on PATH.
+# whole install (its packages are probed via the binaries list). Also report
+# whether ~/.local/bin is on PATH.
 sr_link=missing
 [ "$(readlink -f "$HOME/.local/bin/sandrunner" 2>/dev/null)" = "$(readlink -f "$SHELLDIR/system/sandrunner/sandrunner")" ] && sr_link=ok
-command -v bwrap >/dev/null 2>&1 && sr_bwrap=ok || sr_bwrap=missing
-command -v fuse-overlayfs >/dev/null 2>&1 && sr_fuse=ok || sr_fuse=missing
 case ":$PATH:" in *":$HOME/.local/bin:"*) sr_path=ok ;; *) sr_path=missing ;; esac
-echo "sandrunner|$sr_link|$sr_bwrap|$sr_path|$sr_fuse"
+echo "sandrunner|$sr_link|$sr_path"
 
 # Bar entry ids from the user config, for typo detection shell-side
 python3 - "$HOME/.config/caelestia/shell.json" <<'PY' 2>/dev/null || echo "barids|"
