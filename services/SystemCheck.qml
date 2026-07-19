@@ -273,6 +273,21 @@ Singleton {
             else if (v.enabled)
                 push(`roothalf-${h.dir}`, qsTr("%1 root half installed and current").arg(h.name), qsTr("Feature fully available"), "ok");
         }
+        // sandrunner has no privileged half — "installed" is a ~/.local/bin
+        // symlink into the checkout (updates then arrive with git pull for free)
+        const [srLink, srBwrap, srPath] = flags.sandrunner ?? [];
+        if (srBwrap === "missing")
+            push("sandrunner", qsTr("sandrunner cannot run: bubblewrap missing"), qsTr("The fake-root sandbox needs the bwrap binary"), "warn", {
+                fix: Object.assign({label: qsTr("Install")}, _pacmanFix(qsTr("Installs the bubblewrap package. Nothing else is touched."), ["pacman -S --needed --noconfirm bubblewrap"]))
+            });
+        else if (srLink !== "ok")
+            push("sandrunner", qsTr("sandrunner not on PATH"), qsTr("The sandbox script ships in the checkout but has no ~/.local/bin symlink, so `sandrunner FILE` won't resolve"), "warn", {
+                fix: Object.assign({label: qsTr("Link")}, _userFix(qsTr("Creates ~/.local/bin (if needed) and symlinks the checkout's sandrunner script into it. Updates then track the checkout automatically."), ["mkdir -p \"$HOME/.local/bin\"", `ln -sf '${Quickshell.shellDir}/system/sandrunner/sandrunner' "$HOME/.local/bin/sandrunner"`]))
+            });
+        else if (srPath === "missing")
+            push("sandrunner", qsTr("sandrunner linked but ~/.local/bin not on PATH"), qsTr("The symlink exists but your shell PATH skips ~/.local/bin — add it in your shell profile; needs a manual edit"), "info");
+        else
+            push("sandrunner", qsTr("sandrunner installed"), qsTr("Fake-root sandbox available as `sandrunner FILE`"), "ok");
 
         for (const c of cfgs)
             push(`cfg-${c.file}`, c.ok ? qsTr("Config valid: %1").arg(c.file.split("/").pop()) : qsTr("Config is not valid JSON: %1").arg(c.file.split("/").pop()), c.ok ? c.file : qsTr("%1 — the shell falls back to defaults while this file is broken").arg(c.file), c.ok ? "ok" : "fail", c.ok ? null : {

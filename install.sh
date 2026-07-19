@@ -115,6 +115,15 @@ else
     git clone "https://github.com/$REPO.git" "$SHELL_DIR"
 fi
 
+# sandrunner (fake-root sandbox) is a user-level script: a PATH symlink is
+# the whole install, and it tracks the checkout across updates. bubblewrap
+# is its only runtime dependency.
+if [[ -f $SHELL_DIR/system/sandrunner/sandrunner ]]; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$SHELL_DIR/system/sandrunner/sandrunner" "$HOME/.local/bin/sandrunner"
+    command -v bwrap >/dev/null || sudo pacman -S --needed --noconfirm bubblewrap
+fi
+
 # Caelestia++ ships a full-info fastfetch config (DE row says Caelestia++).
 # Verify the source exists (stale checkout) and copy — never move — the
 # user's config aside so an abort can't lose it.
