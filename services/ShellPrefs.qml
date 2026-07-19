@@ -28,6 +28,11 @@ Singleton {
     // configs still carry the entry, so it stays filtered until enabled here
     readonly property bool barShowActiveWindow: props.barShowActiveWindow
 
+    // Bar system monitor: per-metric visibility of the usage pill
+    readonly property bool barShowCpu: props.barShowCpu
+    readonly property bool barShowRam: props.barShowRam
+    readonly property bool barShowGpu: props.barShowGpu
+
     // Animated DNA background (shown when no image wallpaper is set)
     readonly property bool dnaEnabled: props.dnaEnabled
     readonly property bool dnaUseThemeColor: props.dnaUseThemeColor
@@ -82,6 +87,27 @@ Singleton {
         save();
     }
 
+    function setBarShowCpu(value: bool): void {
+        if (value === props.barShowCpu)
+            return;
+        props.barShowCpu = value;
+        save();
+    }
+
+    function setBarShowRam(value: bool): void {
+        if (value === props.barShowRam)
+            return;
+        props.barShowRam = value;
+        save();
+    }
+
+    function setBarShowGpu(value: bool): void {
+        if (value === props.barShowGpu)
+            return;
+        props.barShowGpu = value;
+        save();
+    }
+
     function setDnaEnabled(value: bool): void {
         if (value === props.dnaEnabled)
             return;
@@ -112,6 +138,9 @@ Singleton {
             barLogoOffsetY: props.barLogoOffsetY,
             barLogoSource: props.barLogoSource,
             barShowActiveWindow: props.barShowActiveWindow,
+            barShowCpu: props.barShowCpu,
+            barShowRam: props.barShowRam,
+            barShowGpu: props.barShowGpu,
             dnaEnabled: props.dnaEnabled,
             dnaUseThemeColor: props.dnaUseThemeColor,
             dnaCustomColor: props.dnaCustomColor
@@ -128,6 +157,9 @@ Singleton {
         property int barLogoOffsetY: 0
         property string barLogoSource: ""
         property bool barShowActiveWindow: false
+        property bool barShowCpu: true
+        property bool barShowRam: true
+        property bool barShowGpu: true
         property bool dnaEnabled: true
         property bool dnaUseThemeColor: true
         property string dnaCustomColor: "#ff5449"
@@ -154,6 +186,9 @@ Singleton {
             props.barLogoOffsetY = saved.barLogoOffsetY ?? 0;
             props.barLogoSource = saved.barLogoSource ?? "";
             props.barShowActiveWindow = saved.barShowActiveWindow ?? false;
+            props.barShowCpu = saved.barShowCpu ?? true;
+            props.barShowRam = saved.barShowRam ?? true;
+            props.barShowGpu = saved.barShowGpu ?? true;
             props.dnaEnabled = saved.dnaEnabled ?? true;
             props.dnaUseThemeColor = saved.dnaUseThemeColor ?? true;
             props.dnaCustomColor = saved.dnaCustomColor ?? "#ff5449";

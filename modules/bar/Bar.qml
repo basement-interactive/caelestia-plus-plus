@@ -7,6 +7,7 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Caelestia.Config
+import Caelestia.Services
 import qs.components
 import qs.services
 
@@ -19,6 +20,8 @@ RowLayout {
     required property bool fullscreen
     // Rounded pill ends need extra inset so end items clear the curvature
     readonly property int hPadding: Tokens.padding.large * 2
+    // System monitor pill only earns bar space while a metric is toggled on
+    readonly property bool sysStatsEnabled: ShellPrefs.barShowCpu || ShellPrefs.barShowRam || (ShellPrefs.barShowGpu && Gpu.type !== Gpu.None)
 
     function closeTray(): void {
         if (!Config.bar.tray.compact)
@@ -122,16 +125,19 @@ RowLayout {
                 const configured = root.Config.bar.entries;
                 const entries = configured.filter(e => (e.enabled ?? true)
                     && !(e.id === "features" && Features.features.length === 0)
-                    && !(e.id === "activeWindow" && !ShellPrefs.barShowActiveWindow));
+                    && !(e.id === "activeWindow" && !ShellPrefs.barShowActiveWindow)
+                    && !(e.id === "sysStats" && !root.sysStatsEnabled));
                 // Fork-only entries: configs written by upstream caelestia
                 // (or an older fork) don't know these ids, so a foreign
                 // shell.json would silently drop the wrench and firewall.
                 // Inject them unless the config mentions the id itself —
                 // an explicit `enabled: false` still wins.
-                for (const id of ["firewall", "features"]) {
+                for (const id of ["firewall", "features", "sysStats"]) {
                     if (configured.some(e => e.id === id))
                         continue;
                     if (id === "features" && Features.features.length === 0)
+                        continue;
+                    if (id === "sysStats" && !root.sysStatsEnabled)
                         continue;
                     const at = entries.findIndex(e => ["tray", "clock", "statusIcons", "power"].includes(e.id));
                     entries.splice(at === -1 ? entries.length : at, 0, {id});
@@ -194,6 +200,14 @@ RowLayout {
                 delegate: EntryWrapper {
                     FeaturesButton {
                         objectName: "taskbarFeatures"
+                    }
+                }
+            }
+            DelegateChoice {
+                roleValue: "sysStats"
+                delegate: EntryWrapper {
+                    SystemStats {
+                        objectName: "taskbarSystemStats"
                     }
                 }
             }

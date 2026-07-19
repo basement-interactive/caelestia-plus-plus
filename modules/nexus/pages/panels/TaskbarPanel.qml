@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick.Layouts
 import Caelestia.Config
+import Caelestia.Services
 import qs.components.filedialog
 import qs.services
 import qs.utils
@@ -98,6 +99,35 @@ PageBase {
             subtext: qsTr("Show the focused window's title in the bar (needs an activeWindow entry in the bar config)")
             checked: ShellPrefs.barShowActiveWindow
             onToggled: ShellPrefs.setBarShowActiveWindow(checked)
+        }
+
+        // System monitor
+        SectionHeader {
+            text: qsTr("System monitor")
+        }
+
+        ToggleRow {
+            first: true
+            text: qsTr("CPU usage")
+            subtext: qsTr("Live CPU load ring in the bar")
+            checked: ShellPrefs.barShowCpu
+            onToggled: ShellPrefs.setBarShowCpu(checked)
+        }
+
+        ToggleRow {
+            text: qsTr("RAM usage")
+            subtext: qsTr("Live memory usage ring in the bar")
+            checked: ShellPrefs.barShowRam
+            onToggled: ShellPrefs.setBarShowRam(checked)
+        }
+
+        ToggleRow {
+            last: true
+            text: qsTr("GPU usage")
+            subtext: Gpu.type === Gpu.None ? qsTr("No supported GPU detected") : qsTr("Live GPU load ring in the bar")
+            enabled: Gpu.type !== Gpu.None
+            checked: ShellPrefs.barShowGpu
+            onToggled: ShellPrefs.setBarShowGpu(checked)
         }
 
         // Behaviour
