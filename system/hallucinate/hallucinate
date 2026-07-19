@@ -17,13 +17,12 @@ deliberately basic toolkit), urllib for Gemini.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import queue
 import sys
 import threading
-import urllib.error
-import urllib.request
 
 # --------------------------------------------------------------------------- #
 # Config                                                                       #
@@ -39,7 +38,8 @@ KEY_FILE = os.path.expanduser("~/.config/caelestia/gemini.key")
 # seconds and returns truncated specs (a calculator with no buttons). Lite is
 # both faster and more reliable for this constrained schema.
 DEFAULT_MODEL = "gemini-flash-lite-latest"
-ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+_HOST = "generativelanguage.googleapis.com"
+_PATH = "/v1beta/models/{model}:generateContent"
 
 # The widget vocabulary the model is allowed to use. Small on purpose: a narrow
 # palette of well-behaved primitives means the model can only assemble things
@@ -86,6 +86,26 @@ RESPONSE_SCHEMA = {
     },
     "required": ["title", "widgets"],
 }
+# Per-interaction responses are a tiny PATCH, not the whole UI: the model
+# returns only the widgets whose visible value changed. Regenerating all ~20
+# widgets as JSON on every keypress was the entire ~2s "backend" latency;
+# emitting one {id,value} pair takes a fraction of the output tokens.
+EVENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "updates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}, "value": {"type": "string"}},
+                "required": ["id", "value"],
+            },
+        },
+        "memory": {"type": "string"},
+        "title": {"type": "string"},
+    },
+    "required": ["updates"],
+}
 
 SYSTEM_PROMPT = f"""\
 You are HALLUCINATE: you are simultaneously the user interface AND the entire \
@@ -123,6 +143,20 @@ buttons use `text`. Never put anything else in `value`.
 - Emit the COMPLETE set of widgets every time (e.g. a calculator needs all its \
 digit and operator buttons), not a partial screen.
 """
+EVENT_SYSTEM_PROMPT = """\
+You are the live backend of a running app that already exists on screen. You \
+are given the app concept, its current widgets (id, type, current text/value), \
+any hidden `memory`, and the user's event (which widget, what kind). YOU decide \
+what happens next — arithmetic, game logic, text transforms, everything — \
+exactly as this app should behave. It is all hallucinated by you; no real code \
+runs.
+
+Return ONLY the widgets whose visible value must change right now, as `updates`: \
+a list of {id, value}. `value` is the new text of a label/button, or the new \
+contents of an entry/slider, or "true"/"false" for a checkbox. Change as few \
+widgets as possible — usually just one display. Never resend unchanged widgets. \
+Put any hidden state you need next turn in `memory`. Output only the JSON, no \
+prose, no reasoning."""
 
 def _read_key_file() -> str | None:
     try:
@@ -132,17 +166,16 @@ def _read_key_file() -> str | None:
         return None
 
 
-def _payload(system: str, user_text: str) -> bytes:
+def _payload(system: str, user_text: str, schema: dict) -> bytes:
     return json.dumps({
         "system_instruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user_text}]}],
         "generationConfig": {
             "responseMimeType": "application/json",
-            "responseSchema": RESPONSE_SCHEMA,
+            "responseSchema": schema,
             "temperature": 1.0,
-            # flash is a thinking model; left on, it reasons *inside* the JSON
-            # (dumping prose into string fields and running out of output before
-            # finishing the widgets). The schema is simple enough not to need it.
+            # Thinking off (lite honours this): replies are instant and never
+            # reason inside the JSON.
             "thinkingConfig": {"thinkingBudget": 0},
         },
     }).encode()
@@ -152,27 +185,47 @@ class GeminiError(RuntimeError):
     pass
 
 
-def gemini(api_key: str, model: str, user_text: str, timeout: int = 60) -> dict:
-    """One structured-output round-trip. Returns the parsed UI spec dict."""
-    req = urllib.request.Request(
-        ENDPOINT.format(model=model),
-        data=_payload(SYSTEM_PROMPT, user_text),
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.load(resp)
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:300]
-        raise GeminiError(f"HTTP {e.code}: {detail}") from e
-    except (urllib.error.URLError, TimeoutError) as e:
-        raise GeminiError(f"network: {e}") from e
+# One HTTPS connection is kept alive across interactions: reusing it skips the
+# TLS handshake every keypress, a big slice of the per-press latency. Guarded
+# by a lock (only one request is ever in flight — the UI gates on `busy`).
+_conn = None
+_conn_lock = threading.Lock()
 
+
+def gemini(api_key: str, model: str, user_text: str, schema: dict,
+           system: str = SYSTEM_PROMPT, timeout: int = 60) -> dict:
+    """One structured-output round-trip over a kept-alive HTTPS connection."""
+    global _conn
+    body = _payload(system, user_text, schema)
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    path = _PATH.format(model=model)
+    with _conn_lock:
+        raw = None
+        for attempt in (1, 2):  # a stale keep-alive socket fails once; reconnect
+            try:
+                if _conn is None:
+                    _conn = http.client.HTTPSConnection(_HOST, timeout=timeout)
+                _conn.request("POST", path, body=body, headers=headers)
+                resp = _conn.getresponse()
+                raw = resp.read()
+                if resp.status != 200:
+                    raise GeminiError(f"HTTP {resp.status}: {raw[:300].decode(errors='replace')}")
+                break
+            except GeminiError:
+                raise
+            except (http.client.HTTPException, OSError) as e:
+                try:
+                    if _conn:
+                        _conn.close()
+                finally:
+                    _conn = None
+                if attempt == 2:
+                    raise GeminiError(f"network: {e}") from e
+    payload = json.loads(raw)
     try:
-        text = body["candidates"][0]["content"]["parts"][0]["text"]
+        text = payload["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError) as e:
-        fb = body.get("promptFeedback") or body.get("error") or body
+        fb = payload.get("promptFeedback") or payload.get("error") or payload
         raise GeminiError(f"no candidate ({json.dumps(fb)[:200]})") from e
     try:
         return json.loads(text)
@@ -246,28 +299,33 @@ class Hallucination:
         self._queue = queue.Queue()
         self.root.after(60, self._drain)
         # First dream happens off the UI thread so the window paints immediately.
-        self._run_async(f"Create the initial app for this concept: {self.concept!r}")
+        self._run_async(f"Create the initial app for this concept: {self.concept!r}",
+                        RESPONSE_SCHEMA, SYSTEM_PROMPT, self._apply)
 
     # -- async plumbing ---------------------------------------------------- #
-    def _run_async(self, user_text: str) -> None:
+    def _run_async(self, user_text: str, schema: dict, system: str, apply_fn) -> None:
         self.busy = True
         self._set_title_busy(True)
 
         def work():
             try:
-                self._queue.put(("ok", gemini(self.api_key, self.model, user_text)))
+                res = gemini(self.api_key, self.model, user_text, schema, system)
+                self._queue.put(("ok", res, apply_fn))
             except GeminiError as e:
-                self._queue.put(("err", str(e)))
+                self._queue.put(("err", str(e), None))
 
         threading.Thread(target=work, daemon=True).start()
 
     def _drain(self) -> None:
         try:
-            kind, payload = self._queue.get_nowait()
+            item = self._queue.get_nowait()
         except queue.Empty:
             pass
         else:
-            (self._apply if kind == "ok" else self._error)(payload)
+            if item[0] == "ok":
+                item[2](item[1])
+            else:
+                self._error(item[1])
         self.root.after(60, self._drain)
 
     def _set_title_busy(self, on: bool) -> None:
@@ -279,16 +337,76 @@ class Hallucination:
         if self.busy:
             return
         self._collect_values()
+        # Send a compact snapshot (ids + current values, no styling) and ask
+        # for a PATCH — the model changes only what should change, so the
+        # response is a few tokens instead of the whole regenerated UI.
         req = {
             "app_concept": self.concept,
-            "current_ui": self.spec,
+            "widgets": self._snapshot(),
             "memory": self.memory,
             "event": {"widget_id": widget_id, "type": kind},
         }
-        self._run_async(
-            "Here is the current app state and the user's interaction. Return the "
-            "full next UI.\n" + json.dumps(req)
-        )
+        self._run_async(json.dumps(req), EVENT_SCHEMA, EVENT_SYSTEM_PROMPT, self._apply_patch)
+
+    def _snapshot(self) -> list:
+        snap = []
+        for w in self.spec.get("widgets", []):
+            e = {"id": w["id"], "type": w["type"]}
+            if w.get("text"):
+                e["text"] = w["text"]
+            if "value" in w:
+                e["value"] = w["value"]
+            if "checked" in w:
+                e["checked"] = w["checked"]
+            snap.append(e)
+        return snap
+
+    def _apply_patch(self, patch: dict) -> None:
+        self.busy = False
+        if isinstance(patch.get("memory"), str):
+            self.memory = patch["memory"]
+        if patch.get("title"):
+            self.spec["title"] = patch["title"]
+        # A patch may occasionally carry a full new widget list to restructure
+        # the screen; otherwise it is just value updates applied in place.
+        if patch.get("widgets"):
+            self.spec = {**self.spec, **patch}
+            self._rebuild(self.spec)
+            self._set_title_busy(False)
+            return
+        for u in patch.get("updates", []):
+            wid, val = u.get("id"), u.get("value", "")
+            for w in self.spec.get("widgets", []):
+                if w["id"] == wid:
+                    if w["type"] in ("label", "button"):
+                        w["text"] = val
+                    else:
+                        w["value"] = val
+                    rec = self.widgets.get(wid)
+                    if rec:
+                        self._set_widget_value(rec, w["type"], val)
+                    break
+        self._set_title_busy(False)
+
+    def _set_widget_value(self, rec: dict, wtype: str, val) -> None:
+        w, var = rec["w"], rec.get("var")
+        try:
+            if wtype in ("label", "button"):
+                w.configure(text=str(val))
+            elif wtype == "entry" and var is not None:
+                var.set(str(val))
+            elif wtype == "text":
+                w.delete("1.0", "end")
+                w.insert("1.0", str(val))
+            elif wtype == "checkbox" and var is not None:
+                var.set(1 if str(val).lower() in ("1", "true", "yes", "on") else 0)
+            elif wtype == "slider" and var is not None:
+                try:
+                    var.set(float(val))
+                except (ValueError, TypeError):
+                    pass
+        except self.tk.TclError:
+            pass
 
     def _collect_values(self) -> None:
         """Read live widget values back into self.spec before sending to the model."""
@@ -483,7 +601,8 @@ def main() -> int:
     if args.dry_run:
         try:
             spec = gemini(api_key, args.model,
-                          f"Create the initial app for this concept: {args.concept!r}")
+                          f"Create the initial app for this concept: {args.concept!r}",
+                          RESPONSE_SCHEMA, SYSTEM_PROMPT)
         except GeminiError as e:
             print(f"hallucinate: {e}", file=sys.stderr)
             return 1

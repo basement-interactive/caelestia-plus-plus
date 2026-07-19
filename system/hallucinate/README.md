@@ -23,9 +23,9 @@ hallucinate "unit converter designed by a caffeinated goblin"
 hallucinate "concept"
    -> Gemini dreams the initial UI as constrained JSON widgets  -> Tkinter renders it
    -> user clicks / types / toggles
-        -> the current UI + live values + the event are sent back to Gemini
-        -> Gemini returns the COMPLETE next UI (it did the "computation")
-        -> the window updates in place
+        -> a compact snapshot (ids + current values) + the event are sent to Gemini
+        -> Gemini returns a tiny PATCH — only the widgets whose value changed
+           (it did the "computation"); the window updates those in place
    -> repeat until closed; hidden state lives in a round-tripped `memory` field
 ```
 
@@ -38,26 +38,35 @@ window; they fall back to a dark theme.
 ## Design notes
 
 - **The AI is the backend.** No arithmetic, no game logic, no state machine
-  runs locally. `current_ui` (including the values you've typed) plus a
+  runs locally. A compact snapshot of the widgets (ids + current values) plus a
   round-tripped `memory` string are the entire state the model gets each turn —
   enough for calculators, games with a secret, converters, etc.
+- **Patch, not full redraw.** Per interaction the model returns only the
+  changed widget values (`updates: [{id, value}]`), not the whole regenerated
+  UI — that alone cut the per-press latency from ~2s to ~0.7s. A patch may
+  carry a full `widgets` list when the app genuinely needs a new screen.
 - **Structured output.** Gemini is pinned to a JSON schema (`responseMimeType`
-  + `responseSchema`) so replies are always valid widget specs, never prose or
-  markdown. Thinking is disabled — left on, the model reasons *inside* the JSON
-  and runs out of output before finishing the widgets.
+  + `responseSchema`) so replies are always valid, never prose or markdown.
+  Thinking is disabled (flash-lite honours `thinkingBudget: 0`) — left on, the
+  model reasons *inside* the JSON and runs out of output before finishing.
+- **Kept-alive HTTPS.** One connection is reused across presses, so there is no
+  TLS handshake per interaction.
 - **Threading.** Model calls run on a worker thread; results cross back to the
   UI through a queue drained by a main-thread poller (Tk is single-threaded and
   crashes if touched off-thread). The title shows `· hallucinating…` while a
   turn is in flight.
 - **Pure standard library** apart from the HTTP call: Tkinter for the UI,
-  `urllib` for Gemini. No pip, no venv.
+  `http.client` for Gemini. No pip, no venv.
 
 ## Latency
 
-Every interaction is a real model round-trip (~1–4s), because *everything* is
-hallucinated — pressing a digit literally asks the AI what the display should
-say next. That is the point, not a bug. Flash-class models keep it snappy
-enough to be fun.
+Every interaction is still a real model round-trip — *everything* is
+hallucinated; pressing a digit literally asks the AI what the display should
+say next. Two things keep the "backend" fast (~0.6-0.8s/press vs ~2s naively):
+the model returns a **patch** (just the changed widget values, a few output
+tokens) instead of regenerating the whole UI, and the HTTPS connection is kept
+alive so there is no TLS handshake per press. The one slower step is the
+initial dream (~2-3s), which builds the whole app.
 
 ## API key
 
