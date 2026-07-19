@@ -5,7 +5,6 @@ import QtQuick.Layouts
 import Quickshell
 import Caelestia.Config
 import qs.components
-import qs.components.containers
 import qs.components.controls
 import qs.services
 
@@ -40,29 +39,17 @@ ColumnLayout {
         wrapMode: Text.WordWrap
     }
 
-    StyledFlickable {
+    RuleManager {
         Layout.fillWidth: true
         Layout.fillHeight: true
         visible: Firewall.connected
-        clip: true
-        contentHeight: mgr.implicitHeight
-        flickableDirection: Flickable.VerticalFlick
-
-        StyledScrollBar.vertical: StyledScrollBar {
-            flickable: parent
-        }
-
-        RuleManager {
-            id: mgr
-            width: parent.width
-            rules: Firewall.rules
-            positiveAction: "allow"
-            negativeAction: "deny"
-            positiveLabel: qsTr("Allow")
-            negativeLabel: qsTr("Deny")
-            emptyText: qsTr("No rules yet. Apps you allow or deny will show up here.")
-            onSetRule: (exe, action, name) => Firewall.setRule(exe, action, name)
-            onDelRule: exe => Firewall.delRule(exe)
-        }
+        rules: Firewall.rules
+        positiveAction: "allow"
+        negativeAction: "deny"
+        positiveLabel: qsTr("Allow")
+        negativeLabel: qsTr("Deny")
+        emptyText: qsTr("No rules yet. Apps you allow or deny will show up here.")
+        onSetRule: (exe, action, name) => Firewall.setRule(exe, action, name)
+        onDelRule: exe => Firewall.delRule(exe)
     }
 }

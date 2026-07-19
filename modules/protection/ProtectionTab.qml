@@ -5,7 +5,6 @@ import QtQuick.Layouts
 import Quickshell
 import Caelestia.Config
 import qs.components
-import qs.components.containers
 import qs.components.controls
 import qs.services
 
@@ -71,33 +70,21 @@ ColumnLayout {
         }
     }
 
-    StyledFlickable {
+    RuleManager {
         Layout.fillWidth: true
         Layout.fillHeight: true
         visible: Protection.connected
-        clip: true
-        contentHeight: mgr.implicitHeight
-        flickableDirection: Flickable.VerticalFlick
-
-        StyledScrollBar.vertical: StyledScrollBar {
-            flickable: parent
-        }
-
-        RuleManager {
-            id: mgr
-            width: parent.width
-            rules: Protection.rules
-            positiveAction: "allow"
-            negativeAction: "block"
-            positiveLabel: qsTr("Allow")
-            negativeLabel: qsTr("Block")
-            positiveTitle: qsTr("Trusted")
-            negativeTitle: qsTr("Blocked")
-            positiveIcon: "verified_user"
-            negativeIcon: "dangerous"
-            emptyText: qsTr("No decisions yet. When a process is frozen and you choose Allow always or Block, it lands here.")
-            onSetRule: (exe, action, name) => Protection.setRule(exe, action, name)
-            onDelRule: exe => Protection.delRule(exe)
-        }
+        rules: Protection.rules
+        positiveAction: "allow"
+        negativeAction: "block"
+        positiveLabel: qsTr("Allow")
+        negativeLabel: qsTr("Block")
+        positiveTitle: qsTr("Trusted")
+        negativeTitle: qsTr("Blocked")
+        positiveIcon: "verified_user"
+        negativeIcon: "dangerous"
+        emptyText: qsTr("No decisions yet. When a process is frozen and you choose Allow always or Block, it lands here.")
+        onSetRule: (exe, action, name) => Protection.setRule(exe, action, name)
+        onDelRule: exe => Protection.delRule(exe)
     }
 }

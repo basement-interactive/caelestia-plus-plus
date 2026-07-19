@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Templates
 import Quickshell
 import Quickshell.Widgets
 import Caelestia.Config
@@ -16,11 +15,16 @@ import qs.utils
 // row an app with a segmented two-way control and a delete button, plus a
 // search box. The host binds the rule data and the verdict/delete callbacks;
 // the two verdicts differ only in label/colour (allow/deny vs allow/block).
+//
+// The whole thing is ONE virtualized ListView (it scrolls itself — hosts must
+// give it a height, not wrap it in a Flickable). Section headers are sentinel
+// entries in the model and rows are keyed by exe path, so delegates survive
+// daemon rule pushes and search keystrokes instead of being rebuilt.
 Item {
     id: root
 
     required property var rules            // [{exe, action, name, ...}]
-    property bool animate: true            // staggered entrance when opening
+    property bool animate: true            // fade-in when opening
 
     property string positiveAction: "allow"
     property string negativeAction: "deny"
@@ -41,208 +45,205 @@ Item {
     signal setRule(string exe, string action, string name)
     signal delRule(string exe)
 
-    readonly property string query: (search.text ?? "").trim().toLowerCase()
-    readonly property var filtered: [...rules].filter(r => !query || (r.name ?? "").toLowerCase().includes(query) || (r.exe ?? "").toLowerCase().includes(query))
-    readonly property var positives: filtered.filter(r => r.action === positiveAction).sort((a, b) => (a.name ?? a.exe).localeCompare(b.name ?? b.exe))
-    readonly property var negatives: filtered.filter(r => r.action !== positiveAction).sort((a, b) => (a.name ?? a.exe).localeCompare(b.name ?? b.exe))
-
     property bool positiveOpen: true
     property bool negativeOpen: true
 
-    implicitHeight: contentCol.implicitHeight
+    property string searchText: ""
+    readonly property string query: searchText.trim().toLowerCase()
 
-    Column {
-        id: contentCol
-
-        width: parent.width
-        spacing: Tokens.spacing.small
-
-        Item {
-            width: parent.width
-            visible: root.rules.length > 0
-            implicitHeight: search.implicitHeight
-
-            SearchBar {
-                id: search
-                anchors.left: parent.left
-                anchors.right: parent.right
-                placeholderText: qsTr("Search apps…")
-            }
-        }
-
-        StyledText {
-            visible: root.filtered.length === 0
-            width: parent.width
-            topPadding: Tokens.padding.large
-            text: root.rules.length === 0 ? root.emptyText : qsTr("No apps match “%1”.").arg(root.query)
-            color: Colours.palette.m3onSurfaceVariant
-            font: Tokens.font.body.small
-            wrapMode: Text.WordWrap
-        }
-
-        RuleSection {
-            title: root.positiveTitle
-            icon: root.positiveIcon
-            accent: root.positiveAccent
-            rules: root.positives
-            expanded: root.positiveOpen || root.query.length > 0
-            onToggled: root.positiveOpen = !root.positiveOpen
-        }
-
-        RuleSection {
-            title: root.negativeTitle
-            icon: root.negativeIcon
-            accent: root.negativeAccent
-            rules: root.negatives
-            expanded: root.negativeOpen || root.query.length > 0
-            entranceIndex: 1
-            onToggled: root.negativeOpen = !root.negativeOpen
-        }
+    // Model entries are exe strings (stable identity) so ScriptModel keeps
+    // delegates alive across rule pushes; row details come from this map.
+    readonly property var ruleByExe: {
+        const map = {};
+        for (const r of rules)
+            map[r.exe] = r;
+        return map;
     }
 
-    component RuleSection: Column {
-        id: section
+    readonly property var positives: sortedExes(r => r.action === positiveAction)
+    readonly property var negatives: sortedExes(r => r.action !== positiveAction)
 
-        required property string title
-        required property string icon
-        required property color accent
-        required property var rules
-        required property bool expanded
-        property int entranceIndex: 0
+    // Section headers as sentinels inline in the one list model; exe paths
+    // are absolute so a leading NUL can't collide.
+    readonly property string hdrPositive: "\u0000+"
+    readonly property string hdrNegative: "\u0000-"
 
-        signal toggled
+    readonly property var listModel: {
+        const out = [];
+        if (positives.length > 0) {
+            out.push(hdrPositive);
+            if (positiveOpen || query)
+                out.push(...positives);
+        }
+        if (negatives.length > 0) {
+            out.push(hdrNegative);
+            if (negativeOpen || query)
+                out.push(...negatives);
+        }
+        return out;
+    }
 
-        visible: rules.length > 0
-        width: contentCol.width
+    // Built once instead of per row — the builder chain allocates.
+    readonly property var rowTitleFont: Tokens.font.body.builders.medium.weight(Font.Medium).build()
+    readonly property var segFont: Tokens.font.body.builders.small.weight(Font.Medium).build()
+
+    function sortedExes(pred: var): var {
+        return rules.filter(r => pred(r) && (!query || (r.name ?? "").toLowerCase().includes(query) || (r.exe ?? "").toLowerCase().includes(query))).sort((a, b) => (a.name ?? a.exe).localeCompare(b.name ?? b.exe)).map(r => r.exe);
+    }
+
+    StyledListView {
+        id: list
+
+        anchors.fill: parent
+        clip: true
         spacing: Tokens.spacing.small
+        flickableDirection: Flickable.VerticalFlick
+
+        model: ScriptModel {
+            values: root.listModel
+        }
 
         opacity: root.animate ? 0 : 1
         Component.onCompleted: opacity = 1
 
         Behavior on opacity {
-            SequentialAnimation {
-                PauseAnimation {
-                    duration: 90 + section.entranceIndex * 50
+            Anim {
+                type: Anim.DefaultEffects
+            }
+        }
+
+        StyledScrollBar.vertical: StyledScrollBar {
+            flickable: list
+        }
+
+        header: Column {
+            width: list.width
+            spacing: Tokens.spacing.small
+            bottomPadding: Tokens.spacing.small
+
+            SearchBar {
+                width: parent.width
+                visible: root.rules.length > 0
+                placeholderText: qsTr("Search apps…")
+                onTextChanged: root.searchText = text
+            }
+
+            StyledText {
+                visible: root.positives.length === 0 && root.negatives.length === 0
+                width: parent.width
+                topPadding: Tokens.padding.large
+                text: root.rules.length === 0 ? root.emptyText : qsTr("No apps match “%1”.").arg(root.query)
+                color: Colours.palette.m3onSurfaceVariant
+                font: Tokens.font.body.small
+                wrapMode: Text.WordWrap
+            }
+        }
+
+        add: Transition {
+            Anim {
+                properties: "opacity"
+                from: 0
+                to: 1
+            }
+        }
+
+        displaced: Transition {
+            Anim {
+                properties: "x,y"
+            }
+        }
+
+        delegate: Item {
+            id: entry
+
+            required property string modelData
+            readonly property bool isHeader: modelData.charCodeAt(0) === 0
+
+            width: ListView.view.width
+            implicitHeight: (headLoader.item ?? rowLoader.item)?.implicitHeight ?? 0
+
+            Loader {
+                id: headLoader
+                width: parent.width
+                active: entry.isHeader
+                sourceComponent: SectionHead {
+                    positive: entry.modelData === root.hdrPositive
                 }
+            }
+
+            Loader {
+                id: rowLoader
+                width: parent.width
+                active: !entry.isHeader
+                sourceComponent: RuleRow {
+                    rule: root.ruleByExe[entry.modelData] ?? null
+                }
+            }
+        }
+    }
+
+    component SectionHead: Item {
+        id: section
+
+        required property bool positive
+        readonly property bool expanded: (positive ? root.positiveOpen : root.negativeOpen) || root.query.length > 0
+        readonly property int count: positive ? root.positives.length : root.negatives.length
+
+        implicitHeight: headRow.implicitHeight + Tokens.padding.medium * 2
+
+        scale: headLayer.pressed ? 0.98 : 1
+
+        Behavior on scale {
+            Anim {
+                type: headLayer.pressed ? Anim.FastSpatial : Anim.Emphasized
+            }
+        }
+
+        StateLayer {
+            id: headLayer
+            radius: Tokens.rounding.medium
+            onClicked: {
+                if (section.positive)
+                    root.positiveOpen = !root.positiveOpen;
+                else
+                    root.negativeOpen = !root.negativeOpen;
+            }
+        }
+
+        Row {
+            id: headRow
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: Tokens.padding.medium
+            spacing: Tokens.spacing.medium
+
+            MaterialIcon {
+                anchors.verticalCenter: parent.verticalCenter
+                text: section.positive ? root.positiveIcon : root.negativeIcon
+                fill: 1
+                color: section.positive ? root.positiveAccent : root.negativeAccent
+            }
+
+            StyledText {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("%1 (%2)").arg(section.positive ? root.positiveTitle : root.negativeTitle).arg(section.count)
+                color: Colours.palette.m3onSurface
+                font: root.rowTitleFont
+            }
+        }
+
+        MaterialIcon {
+            anchors.right: parent.right
+            anchors.rightMargin: Tokens.padding.medium
+            anchors.verticalCenter: parent.verticalCenter
+            text: "expand_more"
+            color: Colours.palette.m3onSurfaceVariant
+            rotation: section.expanded ? 0 : -90
+
+            Behavior on rotation {
                 Anim {
                     type: Anim.DefaultEffects
                 }
-            }
-        }
-
-        Item {
-            id: sectionHead
-
-            width: parent.width
-            implicitHeight: headRow.implicitHeight + Tokens.padding.medium * 2
-
-            scale: headLayer.pressed ? 0.98 : 1
-
-            Behavior on scale {
-                Anim {
-                    type: headLayer.pressed ? Anim.FastSpatial : Anim.Emphasized
-                }
-            }
-
-            StateLayer {
-                id: headLayer
-                radius: Tokens.rounding.medium
-                onClicked: section.toggled()
-            }
-
-            Row {
-                id: headRow
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Tokens.padding.medium
-                spacing: Tokens.spacing.medium
-
-                MaterialIcon {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: section.icon
-                    fill: 1
-                    color: section.accent
-                }
-
-                StyledText {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("%1 (%2)").arg(section.title).arg(section.rules.length)
-                    color: Colours.palette.m3onSurface
-                    font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
-                }
-            }
-
-            MaterialIcon {
-                anchors.right: parent.right
-                anchors.rightMargin: Tokens.padding.medium
-                anchors.verticalCenter: parent.verticalCenter
-                text: "expand_more"
-                color: Colours.palette.m3onSurfaceVariant
-                rotation: section.expanded ? 0 : -90
-
-                Behavior on rotation {
-                    Anim {
-                        type: Anim.DefaultEffects
-                    }
-                }
-            }
-        }
-
-        StyledClippingRect {
-            width: parent.width
-            implicitHeight: section.expanded ? rulesList.contentHeight : 0
-            color: "transparent"
-
-            Behavior on implicitHeight {
-                Anim {
-                    type: Anim.Emphasized
-                }
-            }
-
-            StyledListView {
-                id: rulesList
-                anchors.top: parent.top
-                width: parent.width
-                height: contentHeight
-                interactive: false
-                spacing: Tokens.spacing.small
-
-                model: ScriptModel {
-                    values: section.rules
-                }
-
-                add: Transition {
-                    Anim {
-                        properties: "opacity"
-                        from: 0
-                        to: 1
-                    }
-                    Anim {
-                        properties: "scale"
-                        from: 0.85
-                        to: 1
-                        easing: Tokens.anim.standardDecel
-                    }
-                }
-
-                remove: Transition {
-                    Anim {
-                        properties: "opacity"
-                        to: 0
-                    }
-                    Anim {
-                        properties: "scale"
-                        to: 0.85
-                    }
-                }
-
-                displaced: Transition {
-                    Anim {
-                        properties: "x,y"
-                    }
-                }
-
-                delegate: RuleRow {}
             }
         }
     }
@@ -250,11 +251,10 @@ Item {
     component RuleRow: StyledRect {
         id: row
 
-        required property var modelData
-        readonly property bool positive: modelData.action === root.positiveAction
-        readonly property string appName: modelData.name || (modelData.exe ?? "").split("/").pop()
+        required property var rule
+        readonly property bool positive: rule?.action === root.positiveAction
+        readonly property string appName: rule?.name || (rule?.exe ?? "").split("/").pop()
 
-        width: ListView.view.width
         implicitHeight: rowLayout.implicitHeight + Tokens.padding.medium * 2
         radius: Tokens.rounding.medium
         color: Colours.palette.m3surfaceContainerHigh
@@ -284,15 +284,15 @@ Item {
 
                 StyledText {
                     width: parent.width
-                    text: row.modelData.name ?? ""
+                    text: row.rule?.name ?? ""
                     color: Colours.palette.m3onSurface
-                    font: Tokens.font.body.builders.medium.weight(Font.Medium).build()
+                    font: root.rowTitleFont
                     elide: Text.ElideRight
                 }
 
                 StyledText {
                     width: parent.width
-                    text: root.detailFor ? root.detailFor(row.modelData) : row.modelData.exe
+                    text: root.detailFor ? root.detailFor(row.rule) : (row.rule?.exe ?? "")
                     color: Colours.palette.m3onSurfaceVariant
                     font: Tokens.font.mono.small
                     elide: Text.ElideMiddle
@@ -314,7 +314,7 @@ Item {
                         active: row.positive
                         accent: root.positiveAccent
                         onColour: root.positiveOn
-                        onClicked: root.setRule(row.modelData.exe, root.positiveAction, row.modelData.name)
+                        onClicked: root.setRule(row.rule.exe, root.positiveAction, row.rule.name)
                     }
                     SegButton {
                         id: negSeg
@@ -322,7 +322,7 @@ Item {
                         active: !row.positive
                         accent: root.negativeAccent
                         onColour: root.negativeOn
-                        onClicked: root.setRule(row.modelData.exe, root.negativeAction, row.modelData.name)
+                        onClicked: root.setRule(row.rule.exe, root.negativeAction, row.rule.name)
                     }
                 }
             }
@@ -347,7 +347,7 @@ Item {
                     implicitWidth: parent.implicitHeight + Tokens.padding.small
                     implicitHeight: implicitWidth
                     radius: Tokens.rounding.full
-                    onClicked: root.delRule(row.modelData.exe)
+                    onClicked: root.delRule(row.rule.exe)
                 }
             }
         }
@@ -390,7 +390,7 @@ Item {
             anchors.centerIn: parent
             text: sb.label
             color: sb.active ? sb.onColour : Colours.palette.m3onSurfaceVariant
-            font: Tokens.font.body.builders.small.weight(Font.Medium).build()
+            font: root.segFont
 
             Behavior on color {
                 CAnim {}
