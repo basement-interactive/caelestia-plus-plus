@@ -548,7 +548,23 @@ if cur: toks.append(cur)
 # a bare %1 token becomes the whole URI; embedded %1 (rare) is substituted
 sys.stdout.write("\0".join((uri if t == "%1" else t.replace("%1", uri)) for t in toks))
 ' "$cmd" "$uri")
-    "$WINE" "${argv[@]}" >>"$LOG" 2>&1
+
+    # Launch from the handler program's OWN directory. This is what makes the
+    # app's single-instance handoff work: a portable app (Vortex, Telegram…)
+    # keeps its running-instance lock/socket next to the exe or in a data dir
+    # it resolves relative to the working directory, so launching a link from
+    # the wrong cwd makes the second copy fail to see the first and open a
+    # brand-new window every time. Matching run_target's cwd lets the second
+    # copy find the first, forward the URI, and exit — like on Windows.
+    local exe_unix exe_dir
+    exe_unix=$("$WINE" winepath -u "${argv[0]}" 2>/dev/null)
+    exe_dir=$(dirname "$exe_unix" 2>/dev/null)
+    if [ -n "$exe_dir" ] && [ -d "$exe_dir" ]; then
+        logmsg "routing link to $(basename "${argv[0]}") (cwd: ${exe_dir})"
+        ( cd "$exe_dir" && "$WINE" "${argv[@]}" >>"$LOG" 2>&1 )
+    else
+        "$WINE" "${argv[@]}" >>"$LOG" 2>&1
+    fi
 }
 
 # The directories an installer drops shortcuts into
