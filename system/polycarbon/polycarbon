@@ -246,6 +246,7 @@ recovery_guard() {
     wgi_off)   wgi_crash "$slice" ;;                   # gamepad-API panic
     fsync_off) true ;;                                  # kernel sync issues: last simple lever
     combined)  true ;;                                  # everything applicable at once
+    gpu_soft)  graphics_crash "$slice" ;;              # graphics death: CPU rendering, no GPU at all
     esac
 }
 
@@ -256,11 +257,10 @@ recovery_human() {
     wgi_off)   echo "disable the crashing gamepad API" ;;
     fsync_off) echo "turn off fsync" ;;
     combined)  echo "all compatibility fixes together" ;;
+    gpu_soft)  echo "render without the GPU (slower, but reliable)" ;;
     esac
 }
 
-# id  ->  the env line(s) that apply the tweak. combined = union of the
-# applicable single steps.
 # id, log-slice -> env line(s). combined = union of the applicable singles.
 recovery_env() {
     local slice=${2:-$LOG}
@@ -269,6 +269,10 @@ recovery_env() {
     dxvk_off)  echo 'export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}d3d9,d3d10core,d3d11,d3d12,d3d12core,dxgi=b"' ;;
     wgi_off)   echo 'export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}windows.gaming.input="' ;;
     fsync_off) echo 'export WINEFSYNC=0 WINEESYNC=0' ;;
+    # Last resort for a graphics crash: no GPU in the picture at all. D3D on
+    # OpenGL, OpenGL on Mesa's CPU rasteriser. Slow but sidesteps every GPU /
+    # multi-GPU / driver bug — a program that renders anything renders here.
+    gpu_soft)  echo 'export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}d3d9,d3d10core,d3d11,d3d12,d3d12core,dxgi=b"' ;;
     combined)
         recovery_guard gpu_prime "$slice" && recovery_env gpu_prime
         recovery_guard dxvk_off "$slice" && recovery_env dxvk_off
@@ -797,7 +801,7 @@ Full log: $LOG" dialog-error
     # The recovery ladder: each rung is a Wine quirk tried in its own restart.
     # "" = as-is (with any learned fix); the rest are attempted only if their
     # guard matches the crash, most-likely first, then everything combined.
-    local -a ladder=("" gpu_prime dxvk_off wgi_off fsync_off combined)
+    local -a ladder=("" gpu_prime dxvk_off wgi_off fsync_off combined gpu_soft)
     local code started err failed step extra had_app_logs=""
     local -a tried=()
     # Guards read the signature of the LAST crash; each attempt is judged on
