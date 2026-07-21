@@ -95,6 +95,14 @@ Singleton {
             return;
         scanning = true;
         ShellUpdates.check();
+        // Idempotent desktop integration for the Windows app runner runs
+        // first (fast, self-heals a wiped mimeapps.list); the probes it
+        // affects start when it exits
+        winrunRegister.command = ["bash", Quickshell.shellPath("system/winrun/register.sh"), Quickshell.shellDir];
+        winrunRegister.running = true;
+    }
+
+    function _launchProbes(): void {
         _probesLeft = 2;
         // All general probing lives in one shell script (assets/systemcheck-
         // probe.sh) printing machine-readable "key|field|field" lines;
@@ -356,6 +364,20 @@ Singleton {
             });
         }
 
+        // -- Windows app runner
+        const [wrVer, wrPrefix] = flags.winrun ?? [];
+        if (wrVer && wrVer !== "none")
+            push("winrun", qsTr("Windows app runner installed"), qsTr("%1%2 — double-click any .exe and it runs").arg(wrVer).arg(wrPrefix === "1" ? "" : qsTr(", environment initialises on first run")), "ok");
+        else
+            push("winrun", qsTr("Windows app runner not downloaded yet"), qsTr("The first .exe double-click sets it up by itself (~60 MB, one time) — or grab it now so that first launch is instant"), "info", {
+                fix: Object.assign({label: qsTr("Download")}, _userFix(qsTr("Downloads the Soda runner (checksum-pinned) and prepares the shared Windows environment now. Everything lives under ~/.local/share/caelestia/winrun; nothing system-wide changes."), [`bash '${Quickshell.shellDir}/system/winrun/winrun' --setup`]))
+            });
+        const wrKept = parseInt(flags.winrunmime?.[0] ?? "0", 10);
+        if (wrKept > 0)
+            push("winrun-mime", qsTr("%n Windows file type(s) open elsewhere", "", wrKept), qsTr("%1— double-clicks go to that app instead of the Caelestia runner").arg(flags.winrunmime?.[1] ?? ""), "info", {
+                fix: Object.assign({label: qsTr("Take over")}, _userFix(qsTr("Makes the Caelestia runner the default for .exe/.msi double-clicks. Only file associations change (your other launcher keeps working when opened directly); rerunnable the other way from that app's settings."), [`bash '${Quickshell.shellDir}/system/winrun/register.sh' '${Quickshell.shellDir}' --force`]))
+            });
+
         const dirty = parseInt(flags.gitdirty?.[0] ?? "0", 10);
         push("git-dirty", dirty > 0 ? qsTr("Shell checkout has %1 modified files").arg(dirty) : qsTr("Shell checkout clean"), dirty > 0 ? qsTr("Local edits are fine, but they can conflict with updates — no automatic action") : qsTr("No local modifications"), dirty > 0 ? "info" : "ok");
 
@@ -578,6 +600,12 @@ Singleton {
                 root._probeDone();
             }
         }
+    }
+
+    Process {
+        id: winrunRegister
+
+        onExited: root._launchProbes()
     }
 
     Process {

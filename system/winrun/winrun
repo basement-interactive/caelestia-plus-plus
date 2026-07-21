@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Windows app runner for Caelestia++. Registered as the double-click handler
+# for .exe/.msi (see register.sh); everything needed to run the file is set
+# up on the spot, silently:
+#
+#   - the Soda runner (Bottles' Wine build) is downloaded once into
+#     ~/.local/share/caelestia/winrun on the first ever launch
+#   - a shared default wineprefix is initialised once, with the mono/gecko
+#     download dialogs disabled so nothing ever pops up asking questions
+#   - then the app just runs, like it would after a double-click on Windows
+#
+# Everything is user-level, nothing touches the system. Progress and failures
+# surface as desktop notifications, never as terminal output or dialogs.
+set -u
+
+SODA_VER="soda-9.0-1"
+SODA_URL="https://github.com/bottlesdevs/wine/releases/download/${SODA_VER}/${SODA_VER}-x86_64.tar.xz"
+SODA_SHA256="c38fe0ad3c12a49b61ec1fcaea5c5d8da4a3d1afc5991befe2af6b125f014c28"
+
+BASE="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/winrun"
+RUNNER_DIR="$BASE/runner"
+WINE="$RUNNER_DIR/bin/wine"
+export WINEPREFIX="$BASE/prefix"
+LOG="$BASE/last-run.log"
+
+notify() { # title body [icon]
+    command -v notify-send >/dev/null && notify-send -a "Windows apps" -i "${3:-application-x-executable}" "$1" "$2"
+}
+
+die() {
+    notify "$1" "$2" dialog-error
+    exit 1
+}
+
+# No mono/gecko prompts or downloads, quiet logs, fsync for game performance
+export WINEDLLOVERRIDES="mscoree=;mshtml="
+export WINEDEBUG="-all"
+export WINEFSYNC=1
+
+install_runner() {
+    [ -x "$WINE" ] && [ "$(cat "$BASE/runner.version" 2>/dev/null)" = "$SODA_VER" ] && return 0
+    notify "Setting up Windows apps" "One-time download of the $SODA_VER runner (~60 MB)…" folder-download
+    local tarball="$BASE/$SODA_VER.tar.xz"
+    curl -fsSL --retry 3 -o "$tarball" "$SODA_URL" || die "Windows runner download failed" "Check your connection and double-click again"
+    echo "$SODA_SHA256  $tarball" | sha256sum -c --quiet - || {
+        rm -f "$tarball"
+        die "Windows runner download corrupted" "Checksum mismatch — try again"
+    }
+    rm -rf "$RUNNER_DIR.new" "$RUNNER_DIR"
+    mkdir -p "$RUNNER_DIR.new"
+    tar -xJf "$tarball" --strip-components=1 -C "$RUNNER_DIR.new" || die "Windows runner unpack failed" "See $LOG"
+    mv "$RUNNER_DIR.new" "$RUNNER_DIR"
+    echo "$SODA_VER" > "$BASE/runner.version"
+    rm -f "$tarball"
+}
+
+init_prefix() {
+    [ -f "$WINEPREFIX/system.reg" ] && return 0
+    notify "Preparing Windows environment" "First run only, takes a moment…" preferences-system
+    "$RUNNER_DIR/bin/wineboot" -i >>"$LOG" 2>&1 || die "Windows environment setup failed" "See $LOG"
+    "$RUNNER_DIR/bin/wineserver" -w
+}
+
+run_target() {
+    local target=$1
+    shift
+    cd "$(dirname "$target")" || exit 1
+    case "${target,,}" in
+    *.msi)
+        "$WINE" msiexec /i "$target" "$@" >>"$LOG" 2>&1
+        ;;
+    *.lnk)
+        "$WINE" start /wait /unix "$target" >>"$LOG" 2>&1
+        ;;
+    *)
+        "$WINE" "$target" "$@" >>"$LOG" 2>&1
+        ;;
+    esac
+}
+
+main() {
+    [ $# -ge 1 ] || die "Nothing to run" "winrun expects a .exe, .msi or .lnk path"
+
+    # System-scan fix path: download + prefix init now, run nothing
+    if [ "$1" = "--setup" ]; then
+        mkdir -p "$BASE"
+        : > "$LOG"
+        exec 9> "$BASE/.setup.lock"
+        flock 9
+        echo "installing $SODA_VER runner..."
+        install_runner
+        echo "preparing the shared Windows environment..."
+        init_prefix
+        echo "ready - double-click any .exe"
+        exit 0
+    fi
+
+    local target
+    target=$(realpath "$1")
+    shift
+    [ -e "$target" ] || die "File not found" "$target"
+
+    mkdir -p "$BASE"
+    : > "$LOG"
+
+    # Two rapid double-clicks must not race the download/prefix setup; the
+    # second waits on the lock, finds everything ready and runs normally
+    exec 9> "$BASE/.setup.lock"
+    flock 9
+    install_runner
+    init_prefix
+    flock -u 9
+
+    # No launch notification — a working app appearing IS the feedback, like
+    # on Windows. Only a fast nonzero exit (never got a window up) notifies;
+    # apps returning nonzero after a real session are business as usual.
+    local started=$SECONDS
+    run_target "$target" "$@"
+    local code=$?
+    if [ "$code" -ne 0 ] && [ $((SECONDS - started)) -lt 10 ]; then
+        notify "$(basename "$target") did not start" "Exit code $code — log: $LOG" dialog-error
+    fi
+    exit "$code"
+}
+
+main "$@"
