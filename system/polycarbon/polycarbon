@@ -568,12 +568,20 @@ ensure_ready() {
 # own processes — never polycarbon itself or other apps in the prefix.
 kill_stale() { # exe-basename
     local comm; comm=$(printf '%s' "$1" | cut -c1-15)
-    if pgrep -x "$comm" >/dev/null 2>&1; then
-        logmsg "clearing stale instances of $1"
-        pkill -x "$comm" 2>/dev/null
-        sleep 1
-        pkill -9 -x "$comm" 2>/dev/null
+    pgrep -x "$comm" >/dev/null 2>&1 || return 0
+    # A LIVE session is not stale. Wine maps app windows with class = the exe
+    # basename, so if this exe has a window up right now the user is simply
+    # running it — launching it again (double-click, .lnk, file handoff) must
+    # not shoot the session. Only windowless leftovers are zombies.
+    if command -v hyprctl >/dev/null 2>&1 \
+        && hyprctl clients -j 2>/dev/null | grep -iq "\"class\": *\"$1\""; then
+        logmsg "$1 already has a window open — not touching the running session"
+        return 0
     fi
+    logmsg "clearing stale instances of $1"
+    pkill -x "$comm" 2>/dev/null
+    sleep 1
+    pkill -9 -x "$comm" 2>/dev/null
 }
 
 # A GUI program that neither opens a window nor exits is HUNG (a graphics
@@ -618,8 +626,21 @@ run_with_watchdog() {
             "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
             return 0
         fi
-        if ! kill -0 "$launcher" 2>/dev/null && ! _prefix_busy; then
-            wait "$launcher"; return $?        # fully exited, nothing lingering
+        if ! kill -0 "$launcher" 2>/dev/null; then
+            # The launcher exiting doesn't mean the program is gone: single-
+            # instance apps (Telegram, Vortex) forward to their running copy
+            # and quit, and some apps re-exec themselves. If the program is
+            # still alive after its launcher left, that's a working session —
+            # judging it "no new window = hung" here is what shot a live
+            # Vortex (wineserver -k takes the whole prefix with it).
+            sleep 2                            # let a dying app's procs drain
+            if _app_alive; then
+                wait "$launcher" 2>/dev/null
+                return 0
+            fi
+            if ! _prefix_busy; then
+                wait "$launcher"; return $?    # fully exited, nothing lingering
+            fi
         fi
         if [ "$t" -ge "$WATCHDOG_GRACE" ]; then
             logmsg "$exe never opened a window in ${WATCHDOG_GRACE}s and is still running — treating as hung"
@@ -890,6 +911,10 @@ Full log: $LOG" dialog-error
     local -a appargs=("$@")
     local qf="$QUIRKS_DIR/$exe.env"
     mkdir -p "$QUIRKS_DIR"
+    # Hygiene: saved fixes from the removed virtual-desktop experiment are
+    # dead env now — drop them so "applying saved fix" logs stay truthful.
+    sed -i '/POLYCARBON_VDESKTOP/d' "$QUIRKS_DIR"/*.env 2>/dev/null
+    find "$QUIRKS_DIR" -maxdepth 1 -name '*.env' -empty -delete 2>/dev/null
     # Prevention: a fix learned on a past run is applied from the very first
     # launch, so a program that once crashed just starts.
     local learned=""
