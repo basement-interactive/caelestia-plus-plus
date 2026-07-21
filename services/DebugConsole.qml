@@ -153,16 +153,19 @@ Singleton {
         }
     }
 
-    // Runs for the shell's lifetime; restarted only on rule changes, without
-    // history (-t 0) so the buffer doesn't get duplicated
+    // Runs for the shell's lifetime; restarted only on rule changes. `qs log`
+    // rejects -t 0 (range is >= 1), so no-history restarts tail one line and
+    // drop it on arrival to keep the buffer duplicate-free
     function _restartTail(withHistory: bool): void {
         _tailStopping = tail.running;
+        _skipReplayed = withHistory ? 0 : 1;
         tail.running = false;
-        tail.command = ["qs", "--no-color", "log", "-f", "-t", withHistory ? "200" : "0", "--pid", `${Quickshell.processId}`, "-r", verbose ? verboseRules : quietRules];
+        tail.command = ["qs", "--no-color", "log", "-f", "-t", withHistory ? "200" : "1", "--pid", `${Quickshell.processId}`, "-r", verbose ? verboseRules : quietRules];
         tail.running = true;
     }
 
     property bool _tailStopping: false
+    property int _skipReplayed: 0
 
     Component.onCompleted: _restartTail(true)
 
@@ -170,7 +173,13 @@ Singleton {
         id: tail
 
         stdout: SplitParser {
-            onRead: data => root._append(data)
+            onRead: data => {
+                if (root._skipReplayed > 0) {
+                    root._skipReplayed--;
+                    return;
+                }
+                root._append(data);
+            }
         }
         // `qs log`'s reader thread can crash on a live log under heavy write
         // volume ("[READER] ERROR ... QThread: Destroyed"), which would end
