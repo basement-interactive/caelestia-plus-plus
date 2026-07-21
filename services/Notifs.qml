@@ -80,26 +80,82 @@ Singleton {
         reloadableId: "notifs"
     }
 
-    NotificationServer {
-        id: server
+    // This is the user's main shell — it owns notifications, full stop. The
+    // server lives in a Loader so it can be rebuilt to (re)bind the D-Bus
+    // name: if a foreign daemon (dunst/mako/swaync…) grabbed
+    // org.freedesktop.Notifications first, the grabber below stops it and
+    // rebuilds this, binding the freed name. quickshell then holds the name,
+    // so a respawning daemon can't take it back. No manual "reclaim" needed.
+    Loader {
+        id: serverLoader
 
-        keepOnReload: false
-        actionsSupported: true
-        bodyHyperlinksSupported: true
-        bodyImagesSupported: true
-        bodyMarkupSupported: true
-        imageSupported: true
-        persistenceSupported: true
+        active: true
 
-        onNotification: notif => {
-            notif.tracked = true;
+        sourceComponent: NotificationServer {
+            keepOnReload: false
+            actionsSupported: true
+            bodyHyperlinksSupported: true
+            bodyImagesSupported: true
+            bodyMarkupSupported: true
+            imageSupported: true
+            persistenceSupported: true
 
-            const comp = notifComp.createObject(root, {
-                popup: root.shouldShowPopup(),
-                notification: notif
-            });
-            root.list = [comp, ...root.list];
+            onNotification: notif => {
+                notif.tracked = true;
+
+                const comp = notifComp.createObject(root, {
+                    popup: root.shouldShowPopup(),
+                    notification: notif
+                });
+                root.list = [comp, ...root.list];
+            }
         }
+    }
+
+    function _rebindServer(): void {
+        serverLoader.active = false;
+        Qt.callLater(() => serverLoader.active = true);
+    }
+
+    // Stops whoever owns the notification service if it isn't us, so the
+    // server can claim it. Exits 10 when it displaced a competitor (rebind
+    // needed), 0 when we already own it / it's free / nobody could be found.
+    Process {
+        id: grabber
+
+        command: ["sh", "-c", `owner=$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner s org.freedesktop.Notifications 2>/dev/null | awk '{print $2}' | tr -d '"')
+[ -z "$owner" ] && exit 0
+pid=$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetConnectionUnixProcessID s "$owner" 2>/dev/null | awk '{print $2}')
+[ -z "$pid" ] && exit 0
+[ "$pid" = "${Quickshell.processId}" ] && exit 0
+# A daemon started from the compositor shares its cgroup unit; never stop
+# that (it would kill the desktop) — only a dedicated notification unit.
+unit=$(grep -oE '[a-zA-Z0-9@._-]+\\.service' "/proc/$pid/cgroup" 2>/dev/null | grep -viE 'user@|wayland-wm|graphical-session|hyprland|plasma|gnome-session|session\\.slice|init\\.scope' | head -1)
+[ -n "$unit" ] && systemctl --user stop "$unit" 2>/dev/null
+kill "$pid" 2>/dev/null
+sleep 1
+kill -9 "$pid" 2>/dev/null
+exit 10`]
+
+        onExited: code => {
+            if (code === 10)
+                root._rebindServer();
+        }
+    }
+
+    // Grab at startup (after the server's own first bind attempt) and re-check
+    // periodically — a no-op once we hold the name.
+    Timer {
+        running: true
+        interval: 2000
+        onTriggered: grabber.running = true
+    }
+
+    Timer {
+        running: true
+        repeat: true
+        interval: 60000
+        onTriggered: grabber.running = true
     }
 
     FileView {
