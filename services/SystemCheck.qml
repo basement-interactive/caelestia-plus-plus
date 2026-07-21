@@ -365,12 +365,17 @@ Singleton {
         }
 
         // -- Windows app runner
-        const [wrVer, wrPrefix] = flags.winrun ?? [];
-        if (wrVer && wrVer !== "none")
-            push("winrun", qsTr("Windows app runner installed"), qsTr("%1%2 — double-click any .exe and it runs").arg(wrVer).arg(wrPrefix === "1" ? "" : qsTr(", environment initialises on first run")), "ok");
+        const [wrVer, wrPrefix, wrComp] = flags.winrun ?? [];
+        const winrunSetupFix = Object.assign({label: qsTr("Set up")}, _userFix(qsTr("Downloads the Soda runner plus the full compatibility stack (wine-mono for .NET, wine-gecko for embedded HTML, DXVK and VKD3D-Proton for Direct3D 8-12 on Vulkan machines) — all checksum-pinned, all unattended. Everything lives under ~/.local/share/caelestia/winrun; nothing system-wide changes."), [`bash '${Quickshell.shellDir}/system/winrun/winrun' --setup`]));
+        if (wrVer && wrVer !== "none" && wrComp !== "none")
+            push("winrun", qsTr("Windows app runner ready"), qsTr("%1 with .NET, HTML and Direct3D support — double-click any .exe and it runs (64- and 32-bit)").arg(wrVer), "ok");
+        else if (wrVer && wrVer !== "none")
+            push("winrun", qsTr("Windows runner missing its component stack"), qsTr("The runner works, but .NET/HTML/Direct3D components are not in yet — the next .exe launch installs them, or do it now"), "info", {
+                fix: winrunSetupFix
+            });
         else
-            push("winrun", qsTr("Windows app runner not downloaded yet"), qsTr("The first .exe double-click sets it up by itself (~60 MB, one time) — or grab it now so that first launch is instant"), "info", {
-                fix: Object.assign({label: qsTr("Download")}, _userFix(qsTr("Downloads the Soda runner (checksum-pinned) and prepares the shared Windows environment now. Everything lives under ~/.local/share/caelestia/winrun; nothing system-wide changes."), [`bash '${Quickshell.shellDir}/system/winrun/winrun' --setup`]))
+            push("winrun", qsTr("Windows app runner not downloaded yet"), qsTr("The first .exe double-click sets everything up by itself (~200 MB, one time) — or grab it now so that first launch is instant"), "info", {
+                fix: winrunSetupFix
             });
         const wrKept = parseInt(flags.winrunmime?.[0] ?? "0", 10);
         if (wrKept > 0)

@@ -64,7 +64,7 @@ done
 
 # --- Windows app runner --------------------------------------------------------
 wr_base="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/winrun"
-echo "winrun|$(cat "$wr_base/runner.version" 2>/dev/null || echo none)|$([ -f "$wr_base/prefix/system.reg" ] && echo 1 || echo 0)"
+echo "winrun|$(cat "$wr_base/runner.version" 2>/dev/null || echo none)|$([ -f "$wr_base/prefix/system.reg" ] && echo 1 || echo 0)|$(cat "$wr_base/components.version" 2>/dev/null || echo none)"
 wk=""
 for t in application/x-ms-dos-executable application/vnd.microsoft.portable-executable application/x-msdownload application/x-msi; do
     d=$(xdg-mime query default "$t" 2>/dev/null) || true

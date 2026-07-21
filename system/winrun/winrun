@@ -3,21 +3,42 @@
 # for .exe/.msi (see register.sh); everything needed to run the file is set
 # up on the spot, silently:
 #
-#   - the Soda runner (Bottles' Wine build) is downloaded once into
-#     ~/.local/share/caelestia/winrun on the first ever launch
-#   - a shared default wineprefix is initialised once, with the mono/gecko
-#     download dialogs disabled so nothing ever pops up asking questions
+#   - the Soda runner (Bottles' Wine build, wow64: runs 64- and 32-bit apps)
+#     is downloaded once into ~/.local/share/caelestia/winrun
+#   - one shared wineprefix is initialised without any dialogs
+#   - the full compatibility stack goes in unattended: wine-mono (.NET),
+#     wine-gecko (embedded HTML), and on Vulkan-capable machines DXVK
+#     (Direct3D 8-11) and VKD3D-Proton (Direct3D 12); without Vulkan those
+#     two are skipped and Wine's GL renderer carries D3D instead
 #   - then the app just runs, like it would after a double-click on Windows
 #
-# Everything is user-level, nothing touches the system. Progress and failures
-# surface as desktop notifications, never as terminal output or dialogs.
+# Everything is user-level and checksum-pinned. Progress and failures surface
+# as desktop notifications, never as terminal output or dialogs.
 set -u
 
 SODA_VER="soda-9.0-1"
 SODA_URL="https://github.com/bottlesdevs/wine/releases/download/${SODA_VER}/${SODA_VER}-x86_64.tar.xz"
 SODA_SHA256="c38fe0ad3c12a49b61ec1fcaea5c5d8da4a3d1afc5991befe2af6b125f014c28"
 
+# Bump when anything in the component set below changes; installed prefixes
+# catch up on their next launch
+COMPONENTS_VER="2026-07-21"
+DXVK_VER="3.0.2"
+DXVK_URL="https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VER}/dxvk-${DXVK_VER}.tar.gz"
+DXVK_SHA256="9c538924110a7cdef871ca36dee218c0774124374ffdeb38af4b76be55bdf7c2"
+VKD3D_VER="3.0.1"
+VKD3D_URL="https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v${VKD3D_VER}/vkd3d-proton-${VKD3D_VER}.tar.zst"
+VKD3D_SHA256="3cf2315522af5e43605ef6d3c41dad91387040bf97199934f3f7ab76caaa2f0c"
+MONO_VER="8.1.0"
+MONO_URL="https://dl.winehq.org/wine/wine-mono/${MONO_VER}/wine-mono-${MONO_VER}-x86.msi"
+MONO_SHA256="0ed3ec533aef79b2f312155931cf7b1080009ac0c5b4c2bcfeb678ac948e0810"
+GECKO_VER="2.47.4"
+GECKO_URL="https://dl.winehq.org/wine/wine-gecko/${GECKO_VER}/wine-gecko-${GECKO_VER}"
+GECKO64_SHA256="e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f"
+GECKO32_SHA256="26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6"
+
 BASE="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/winrun"
+mkdir -p "$BASE"
 RUNNER_DIR="$BASE/runner"
 WINE="$RUNNER_DIR/bin/wine"
 export WINEPREFIX="$BASE/prefix"
@@ -32,33 +53,109 @@ die() {
     exit 1
 }
 
-# No mono/gecko prompts or downloads, quiet logs, fsync for game performance
-export WINEDLLOVERRIDES="mscoree=;mshtml="
+say() { # --setup runs stream stdout into the scan's fix card
+    [ "${SETUP_MODE:-}" = 1 ] && echo "$1"
+    return 0
+}
+
 export WINEDEBUG="-all"
 export WINEFSYNC=1
 
+fetch() { # url sha256 dest
+    curl -fsSL --retry 3 -o "$3" "$1" || die "Download failed" "$1 — check your connection and try again"
+    echo "$2  $3" | sha256sum -c --quiet - || {
+        rm -f "$3"
+        die "Download corrupted" "Checksum mismatch on $(basename "$3") — try again"
+    }
+}
+
+vulkan_ok() {
+    ls /usr/share/vulkan/icd.d/*.json >/dev/null 2>&1
+}
+
 install_runner() {
     [ -x "$WINE" ] && [ "$(cat "$BASE/runner.version" 2>/dev/null)" = "$SODA_VER" ] && return 0
+    say "downloading $SODA_VER runner (~60 MB)..."
     notify "Setting up Windows apps" "One-time download of the $SODA_VER runner (~60 MB)…" folder-download
-    local tarball="$BASE/$SODA_VER.tar.xz"
-    curl -fsSL --retry 3 -o "$tarball" "$SODA_URL" || die "Windows runner download failed" "Check your connection and double-click again"
-    echo "$SODA_SHA256  $tarball" | sha256sum -c --quiet - || {
-        rm -f "$tarball"
-        die "Windows runner download corrupted" "Checksum mismatch — try again"
-    }
+    fetch "$SODA_URL" "$SODA_SHA256" "$BASE/runner.tar.xz"
     rm -rf "$RUNNER_DIR.new" "$RUNNER_DIR"
     mkdir -p "$RUNNER_DIR.new"
-    tar -xJf "$tarball" --strip-components=1 -C "$RUNNER_DIR.new" || die "Windows runner unpack failed" "See $LOG"
+    tar -xJf "$BASE/runner.tar.xz" --strip-components=1 -C "$RUNNER_DIR.new" || die "Windows runner unpack failed" "See $LOG"
     mv "$RUNNER_DIR.new" "$RUNNER_DIR"
     echo "$SODA_VER" > "$BASE/runner.version"
-    rm -f "$tarball"
+    rm -f "$BASE/runner.tar.xz"
 }
 
 init_prefix() {
     [ -f "$WINEPREFIX/system.reg" ] && return 0
+    say "preparing the shared Windows environment..."
     notify "Preparing Windows environment" "First run only, takes a moment…" preferences-system
-    "$RUNNER_DIR/bin/wineboot" -i >>"$LOG" 2>&1 || die "Windows environment setup failed" "See $LOG"
+    # mono/gecko are suppressed only for this bootstrap (their download
+    # dialogs are the popups this runner exists to avoid); the real things
+    # are installed unattended right after by install_components
+    env WINEDLLOVERRIDES="mscoree=;mshtml=" "$RUNNER_DIR/bin/wineboot" -i >>"$LOG" 2>&1 || die "Windows environment setup failed" "See $LOG"
     "$RUNNER_DIR/bin/wineserver" -w
+}
+
+_dll_native() { # dll...
+    for dll in "$@"; do
+        "$WINE" reg add 'HKCU\Software\Wine\DllOverrides' /v "$dll" /d native /f >>"$LOG" 2>&1
+    done
+}
+
+install_components() {
+    [ "$(cat "$BASE/components.version" 2>/dev/null)" = "$COMPONENTS_VER" ] && return 0
+    notify "Installing Windows components" "One-time: .NET, HTML and Direct3D support (~150 MB)…" folder-download
+    local tmp="$BASE/components.tmp"
+    rm -rf "$tmp"
+    mkdir -p "$tmp"
+
+    say "installing wine-mono $MONO_VER (.NET apps)..."
+    fetch "$MONO_URL" "$MONO_SHA256" "$tmp/mono.msi"
+    "$WINE" msiexec /i "$tmp/mono.msi" /qn >>"$LOG" 2>&1 || die "wine-mono install failed" "See $LOG"
+
+    say "installing wine-gecko $GECKO_VER (embedded HTML)..."
+    fetch "$GECKO_URL-x86_64.msi" "$GECKO64_SHA256" "$tmp/gecko64.msi"
+    fetch "$GECKO_URL-x86.msi" "$GECKO32_SHA256" "$tmp/gecko32.msi"
+    "$WINE" msiexec /i "$tmp/gecko64.msi" /qn >>"$LOG" 2>&1 || die "wine-gecko install failed" "See $LOG"
+    "$WINE" msiexec /i "$tmp/gecko32.msi" /qn >>"$LOG" 2>&1 || die "wine-gecko (32-bit) install failed" "See $LOG"
+
+    if vulkan_ok; then
+        say "installing DXVK $DXVK_VER (Direct3D 8-11 over Vulkan)..."
+        fetch "$DXVK_URL" "$DXVK_SHA256" "$tmp/dxvk.tar.gz"
+        tar -xzf "$tmp/dxvk.tar.gz" -C "$tmp" || die "DXVK unpack failed" "See $LOG"
+        cp "$tmp/dxvk-$DXVK_VER/x64/"*.dll "$WINEPREFIX/drive_c/windows/system32/"
+        cp "$tmp/dxvk-$DXVK_VER/x32/"*.dll "$WINEPREFIX/drive_c/windows/syswow64/"
+        _dll_native d3d8 d3d9 d3d10core d3d11 dxgi
+
+        say "installing VKD3D-Proton $VKD3D_VER (Direct3D 12 over Vulkan)..."
+        fetch "$VKD3D_URL" "$VKD3D_SHA256" "$tmp/vkd3d.tar.zst"
+        tar --zstd -xf "$tmp/vkd3d.tar.zst" -C "$tmp" || die "VKD3D unpack failed" "See $LOG"
+        cp "$tmp/vkd3d-proton-$VKD3D_VER/x64/"*.dll "$WINEPREFIX/drive_c/windows/system32/"
+        cp "$tmp/vkd3d-proton-$VKD3D_VER/x86/"*.dll "$WINEPREFIX/drive_c/windows/syswow64/"
+        _dll_native d3d12 d3d12core
+    else
+        say "no Vulkan driver found - skipping DXVK/VKD3D, Direct3D runs on OpenGL"
+    fi
+
+    # Windows leaves fonts jagged by default; every desktop expects smoothing
+    "$WINE" reg add 'HKCU\Control Panel\Desktop' /v FontSmoothing /d 2 /f >>"$LOG" 2>&1
+    "$WINE" reg add 'HKCU\Control Panel\Desktop' /v FontSmoothingType /t REG_DWORD /d 2 /f >>"$LOG" 2>&1
+    "$RUNNER_DIR/bin/wineserver" -w
+    rm -rf "$tmp"
+    echo "$COMPONENTS_VER" > "$BASE/components.version"
+    notify "Windows apps ready" "Runner, .NET, HTML and Direct3D support installed" checkmark
+}
+
+ensure_ready() {
+    # Two rapid double-clicks must not race the setup; the second waits on
+    # the lock, finds everything ready and runs normally
+    exec 9> "$BASE/.setup.lock"
+    flock 9
+    install_runner
+    init_prefix
+    install_components
+    flock -u 9
 }
 
 run_target() {
@@ -81,17 +178,12 @@ run_target() {
 main() {
     [ $# -ge 1 ] || die "Nothing to run" "winrun expects a .exe, .msi or .lnk path"
 
-    # System-scan fix path: download + prefix init now, run nothing
+    # System-scan fix path: full setup now, run nothing
     if [ "$1" = "--setup" ]; then
-        mkdir -p "$BASE"
+        SETUP_MODE=1
         : > "$LOG"
-        exec 9> "$BASE/.setup.lock"
-        flock 9
-        echo "installing $SODA_VER runner..."
-        install_runner
-        echo "preparing the shared Windows environment..."
-        init_prefix
-        echo "ready - double-click any .exe"
+        ensure_ready
+        say "ready - double-click any .exe"
         exit 0
     fi
 
@@ -100,16 +192,8 @@ main() {
     shift
     [ -e "$target" ] || die "File not found" "$target"
 
-    mkdir -p "$BASE"
     : > "$LOG"
-
-    # Two rapid double-clicks must not race the download/prefix setup; the
-    # second waits on the lock, finds everything ready and runs normally
-    exec 9> "$BASE/.setup.lock"
-    flock 9
-    install_runner
-    init_prefix
-    flock -u 9
+    ensure_ready
 
     # No launch notification — a working app appearing IS the feedback, like
     # on Windows. Only a fast nonzero exit (never got a window up) notifies;
