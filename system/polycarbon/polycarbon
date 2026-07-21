@@ -366,10 +366,26 @@ run_target() {
     *.lnk)
         "$WINE" start /wait /unix "$target" >>"$LOG" 2>&1
         ;;
+    *.bat | *.cmd)
+        "$WINE" cmd /c "$(winpath "$target")" "$@" >>"$LOG" 2>&1
+        ;;
+    *.vbs | *.vbe | *.wsf)
+        "$WINE" wscript "$(winpath "$target")" "$@" >>"$LOG" 2>&1
+        ;;
+    *.reg)
+        # regedit shows the standard import-confirmation, same as Windows
+        "$WINE" regedit "$(winpath "$target")" >>"$LOG" 2>&1
+        ;;
     *)
         "$WINE" "$target" "$@" >>"$LOG" 2>&1
         ;;
     esac
+}
+
+# cmd/wscript/regedit want Windows-style paths; winepath translates any Linux
+# path through the drive mappings (H:\, Z:\, …)
+winpath() {
+    "$WINE" winepath -w "$1" 2>/dev/null
 }
 
 # The directories an installer drops shortcuts into

@@ -15,7 +15,7 @@ FORCE=${2:-}
 DESKTOP_ID="caelestia-polycarbon.desktop"
 LEGACY_ID="caelestia-winrun.desktop"
 APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-MIME_TYPES="application/x-ms-dos-executable application/vnd.microsoft.portable-executable application/x-msdownload application/x-msi application/x-ms-shortcut"
+MIME_TYPES="application/x-ms-dos-executable application/vnd.microsoft.portable-executable application/x-msdownload application/x-msi application/x-ms-shortcut text/x-msdos-batch text/vbscript text/x-ms-regedit"
 
 mkdir -p "$APPS_DIR"
 cat > "$APPS_DIR/$DESKTOP_ID" <<EOF
