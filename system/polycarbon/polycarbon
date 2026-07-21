@@ -336,6 +336,14 @@ install_runner() {
 check_runner_update() {
     local force=${1:-}
     local stamp="$BASE/.update-check"
+    # A runner from a DIFFERENT line (the configured build just changed — e.g.
+    # staging -> proton) must switch on the next launch, not wait out the daily
+    # throttle: its version won't match the current line's tag pattern.
+    local installed; installed=$(cat "$BASE/runner.version" 2>/dev/null)
+    if [ -n "$installed" ] && ! printf '%s' "$installed" | grep -qE "$RUNNER_TAG_PATTERN"; then
+        force=force
+        say "runtime is from a superseded build ($installed) — switching lines now"
+    fi
     if [ "$force" != "force" ] && [ -f "$stamp" ]; then
         local age=$(( $(date +%s) - $(stat -c %Y "$stamp" 2>/dev/null || echo 0) ))
         [ "$age" -lt "$RUNNER_CHECK_SECONDS" ] && return 0
