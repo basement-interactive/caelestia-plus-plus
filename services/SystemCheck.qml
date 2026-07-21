@@ -377,6 +377,18 @@ Singleton {
             push("polycarbon", qsTr("Polycarbon (Windows apps) not downloaded yet"), qsTr("The first .exe double-click sets everything up by itself (~200 MB, one time) — or grab it now so that first launch is instant"), "info", {
                 fix: polycarbonSetupFix
             });
+        // Direct execution of a Windows binary (file manager "Run executable",
+        // ./foo.exe) bypasses MIME handlers — only a kernel binfmt entry can
+        // route it. Registered system-wide, so it needs the one-time root fix.
+        const [bfState] = flags.polycarbonbinfmt ?? [];
+        const binfmtCmds = [`printf ':polycarbon:M::MZ::%s:\\n' '${Quickshell.shellDir}/system/polycarbon/polycarbon' > /etc/binfmt.d/zz-polycarbon.conf`, "systemctl restart systemd-binfmt"];
+        if (bfState === "ok")
+            push("polycarbon-binfmt", qsTr("Windows binaries execute directly"), qsTr("The kernel hands any launched .exe to Polycarbon — \"Run\" in file managers and ./program.exe both work"), "ok");
+        else if (wrVer && wrVer !== "none")
+            push("polycarbon-binfmt", bfState === "stale" ? qsTr("Direct .exe execution points at an old location") : qsTr("Direct .exe execution not wired up"), qsTr("A file manager's \"Run executable\" bypasses file associations — without the kernel-level handler it just fails. One-time root setup fixes it for good."), "warn", {
+                fix: Object.assign({label: qsTr("Wire up")}, _rootFix(qsTr("Registers Polycarbon as the kernel's handler for Windows executables (binfmt_misc): one config line in /etc/binfmt.d plus a systemd-binfmt restart. After this, running any .exe — from a file manager or a terminal — starts it through Polycarbon."), binfmtCmds))
+            });
+
         const wrKept = parseInt(flags.polycarbonmime?.[0] ?? "0", 10);
         if (wrKept > 0)
             push("polycarbon-mime", qsTr("%n Windows file type(s) open elsewhere", "", wrKept), qsTr("%1— double-clicks go to that app instead of Polycarbon").arg(flags.polycarbonmime?.[1] ?? ""), "info", {

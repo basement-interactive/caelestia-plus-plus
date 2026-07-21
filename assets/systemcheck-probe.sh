@@ -74,6 +74,20 @@ for t in application/x-ms-dos-executable application/vnd.microsoft.portable-exec
 done
 echo "polycarbonmime|$(printf '%s' "$wk" | wc -w)|$(printf '%s' "$wk" | tr '|' '/')"
 
+# Executing a Windows binary directly (file manager "Run", ./foo.exe) goes
+# through binfmt_misc, not MIME handlers — report whether the kernel routes
+# MZ executables to Polycarbon and whether the interpreter path is current
+if [ -f /proc/sys/fs/binfmt_misc/polycarbon ]; then
+    bi=$(awk '/^interpreter/{print $2}' /proc/sys/fs/binfmt_misc/polycarbon)
+    if [ "$bi" = "$SHELLDIR/system/polycarbon/polycarbon" ]; then
+        echo "polycarbonbinfmt|ok|$bi"
+    else
+        echo "polycarbonbinfmt|stale|$bi"
+    fi
+else
+    echo "polycarbonbinfmt|missing|"
+fi
+
 # --- Notification daemon ownership ---------------------------------------------
 # Whoever owns org.freedesktop.Notifications on the session bus renders every
 # notification. If that is not this quickshell, the shell's own (much nicer)
