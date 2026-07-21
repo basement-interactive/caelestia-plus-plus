@@ -3,6 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.services
 
 // Update channel for the Caelestia++ fork: compares the running shell's
 // checkout against origin/main on GitHub and can fast-forward + restart.
@@ -29,6 +30,20 @@ Singleton {
     property string lastError
 
     readonly property bool updateAvailable: commitsBehind > 0
+
+    // Auto-apply updates once per session, at startup only (never yanked out
+    // from under an active session by a periodic check). Default on so fixes
+    // actually reach people; opt out by flipping this in the Updates tab.
+    property alias autoUpdate: props.autoUpdate
+    property bool _startupPass: true
+
+    PersistentProperties {
+        id: props
+
+        property bool autoUpdate: true
+
+        reloadableId: "shellUpdates"
+    }
 
     function check(): void {
         if (checking || updating)
@@ -69,10 +84,18 @@ Singleton {
         onExited: code => {
             root.checking = false;
             root.lastChecked = Qt.formatDateTime(new Date(), "hh:mm");
+            const wasStartup = root._startupPass;
+            root._startupPass = false;
             if (code === 2)
                 root.lastError = qsTr("Could not reach the update server");
             else if (code !== 0)
                 root.lastError = qsTr("Update check failed");
+            else if (wasStartup && root.autoUpdate && root.updateAvailable) {
+                // Apply on startup so users are always current without lifting
+                // a finger; the shell restarts once into the new version.
+                Toaster.toast(qsTr("Updating Caelestia++"), qsTr("%1 new change(s) — applying and restarting").arg(root.commitsBehind), "update");
+                root.update();
+            }
         }
     }
 

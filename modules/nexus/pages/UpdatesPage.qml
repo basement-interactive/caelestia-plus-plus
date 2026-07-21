@@ -133,6 +133,20 @@ PageBase {
             }
         }
 
+        // Settings
+        SectionHeader {
+            text: qsTr("Settings")
+        }
+
+        ToggleRow {
+            first: true
+            last: true
+            text: qsTr("Automatic updates")
+            subtext: qsTr("Apply new updates on startup so you're always current")
+            checked: ShellUpdates.autoUpdate
+            onToggled: ShellUpdates.autoUpdate = checked
+        }
+
         // Installed
         SectionHeader {
             text: qsTr("Installed")
