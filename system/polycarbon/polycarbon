@@ -6,13 +6,19 @@
 # up on the spot, silently:
 #
 #   - the Soda runner (Bottles' Wine build, wow64: runs 64- and 32-bit apps)
-#     is downloaded once into ~/.local/share/caelestia/winrun
-#   - one shared wineprefix is initialised without any dialogs
+#     is downloaded once into ~/.local/share/caelestia/polycarbon
+#   - one shared wineprefix is initialised without any dialogs, with the
+#     Windows user folders (Documents, Downloads, Desktop…) pointed straight
+#     at the real Linux ones and the whole home tree reachable as H:\
 #   - the full compatibility stack goes in unattended: wine-mono (.NET),
 #     wine-gecko (embedded HTML), and on Vulkan-capable machines DXVK
 #     (Direct3D 8-11) and VKD3D-Proton (Direct3D 12); without Vulkan those
 #     two are skipped and Wine's GL renderer carries D3D instead
-#   - then the app just runs, like it would after a double-click on Windows
+#   - a runtime-library layer (winetricks: the VC++ runtimes, core fonts,
+#     the D3D shader compiler and more) so far more real programs just run
+#   - after an installer finishes, the Start Menu / Desktop shortcuts it
+#     created are turned into real Linux launchers, so installed programs
+#     show up in the app menu exactly like they would on Windows
 #
 # Everything is user-level and checksum-pinned. Progress and failures surface
 # as desktop notifications, never as terminal output or dialogs.
@@ -24,7 +30,17 @@ SODA_SHA256="c38fe0ad3c12a49b61ec1fcaea5c5d8da4a3d1afc5991befe2af6b125f014c28"
 
 # Bump when anything in the component set below changes; installed prefixes
 # catch up on their next launch
-COMPONENTS_VER="2026-07-21"
+COMPONENTS_VER="2026-07-21b"
+# The winetricks runtime-library layer, tracked separately so its verb set
+# can grow without re-running the heavier component install
+BINDINGS_VER="2026-07-21"
+WINETRICKS_VER="20260125"
+WINETRICKS_URL="https://raw.githubusercontent.com/Winetricks/winetricks/${WINETRICKS_VER}/src/winetricks"
+WINETRICKS_SHA256="431f82fc74000e6c864409f1d8fb495d696c03928808e3e8acffc45179312a7b"
+# Reliable, non-interactive verbs most Windows software expects to find.
+# .NET is covered by wine-mono, so winetricks' heavy dotnet verbs are left
+# out on purpose. Each is best-effort — a verb that fails never blocks a run.
+WINETRICKS_VERBS="corefonts vcrun2022 vcrun2019 vcrun2013 vcrun2010 d3dcompiler_47 d3dx9"
 DXVK_VER="3.0.2"
 DXVK_URL="https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VER}/dxvk-${DXVK_VER}.tar.gz"
 DXVK_SHA256="9c538924110a7cdef871ca36dee218c0774124374ffdeb38af4b76be55bdf7c2"
@@ -39,6 +55,10 @@ GECKO_URL="https://dl.winehq.org/wine/wine-gecko/${GECKO_VER}/wine-gecko-${GECKO
 GECKO64_SHA256="e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f"
 GECKO32_SHA256="26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6"
 
+SELF=$(realpath "$0")
+# Harvested launchers live flat here with a polycarbon- name prefix, so their
+# desktop IDs stay simple and every launcher/menu finds them
+APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 BASE="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/polycarbon"
 # Pre-rename installs keep their runner, prefix and apps — just moved over
 OLD_BASE="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/winrun"
@@ -100,6 +120,74 @@ init_prefix() {
     # are installed unattended right after by install_components
     env WINEDLLOVERRIDES="mscoree=;mshtml=" "$RUNNER_DIR/bin/wineboot" -i >>"$LOG" 2>&1 || die "Windows environment setup failed" "See $LOG"
     "$RUNNER_DIR/bin/wineserver" -w
+    link_filesystem
+}
+
+# Make the Linux filesystem a first-class citizen inside Windows:
+#   - the profile's Documents/Downloads/Desktop/… point at the real XDG
+#     dirs, so what a program saves to "Documents" lands in ~/Documents and
+#     files you already have are visible to Save/Open dialogs
+#   - H:\ is the whole home directory; Z:\ (Wine's default) stays as / so
+#     any absolute Linux path is reachable, e.g. a tool like FolderChangesView
+#     can watch H:\Projects or Z:\etc directly
+link_filesystem() {
+    local profile
+    profile=$(ls -d "$WINEPREFIX/drive_c/users/"*/ 2>/dev/null | grep -viE '/Public/$' | head -1)
+    [ -n "$profile" ] || profile="$WINEPREFIX/drive_c/users/steamuser/"
+
+    link_dir "$profile/Desktop" "${XDG_DESKTOP_DIR:-$HOME/Desktop}"
+    link_dir "$profile/Documents" "${XDG_DOCUMENTS_DIR:-$HOME/Documents}"
+    link_dir "$profile/Downloads" "${XDG_DOWNLOAD_DIR:-$HOME/Downloads}"
+    link_dir "$profile/Pictures" "${XDG_PICTURES_DIR:-$HOME/Pictures}"
+    link_dir "$profile/Music" "${XDG_MUSIC_DIR:-$HOME/Music}"
+    link_dir "$profile/Videos" "${XDG_VIDEOS_DIR:-$HOME/Videos}"
+
+    ln -sfn "$HOME" "$WINEPREFIX/dosdevices/h:"
+}
+
+# Replace an in-prefix folder with a symlink to its real Linux counterpart,
+# but never destroy files: if the Windows folder already holds data, move it
+# into the target first
+link_dir() {
+    local win=$1 real=$2
+    [ -L "$win" ] && return 0
+    mkdir -p "$real"
+    if [ -d "$win" ]; then
+        find "$win" -mindepth 1 -maxdepth 1 -exec mv -n {} "$real/" \; 2>/dev/null
+        rmdir "$win" 2>/dev/null || rm -rf "$win"
+    fi
+    ln -sfn "$real" "$win"
+}
+
+install_bindings() {
+    [ "$(cat "$BASE/bindings.version" 2>/dev/null)" = "$BINDINGS_VER" ] && return 0
+    local wt="$RUNNER_DIR/bin/winetricks"
+    if [ ! -x "$wt" ]; then
+        fetch "$WINETRICKS_URL" "$WINETRICKS_SHA256" "$wt"
+        chmod +x "$wt"
+    fi
+    say "installing runtime libraries (VC++ runtimes, core fonts, D3D compiler)..."
+    notify "Installing Windows runtime libraries" "One-time: the runtimes most programs expect…" folder-download
+    # winetricks must use this runner, not any system wine; --unattended
+    # answers every installer dialog. Verbs run one at a time so one failure
+    # (e.g. a flaky mirror) doesn't take the rest down with it.
+    local ok=0 verb
+    for verb in $WINETRICKS_VERBS; do
+        say "  · $verb"
+        if env WINE="$WINE" WINESERVER="$RUNNER_DIR/bin/wineserver" PATH="$RUNNER_DIR/bin:$PATH" \
+            "$wt" -q --unattended "$verb" >>"$LOG" 2>&1; then
+            ok=$((ok + 1))
+        else
+            say "    ($verb skipped — will retry on a later setup)"
+        fi
+    done
+    "$RUNNER_DIR/bin/wineserver" -w
+    # Only stamp as done when every verb landed; a partial set retries next
+    # time instead of being declared finished
+    local total
+    total=$(echo "$WINETRICKS_VERBS" | wc -w)
+    [ "$ok" -eq "$total" ] && echo "$BINDINGS_VER" > "$BASE/bindings.version"
+    say "runtime libraries: $ok/$total installed"
 }
 
 _dll_native() { # dll...
@@ -160,6 +248,8 @@ ensure_ready() {
     install_runner
     init_prefix
     install_components
+    link_filesystem   # cheap + idempotent; also upgrades pre-existing prefixes
+    install_bindings
     flock -u 9
 }
 
@@ -178,6 +268,68 @@ run_target() {
         "$WINE" "$target" "$@" >>"$LOG" 2>&1
         ;;
     esac
+}
+
+# The directories an installer drops shortcuts into
+_shortcut_roots() {
+    local profile
+    profile=$(ls -d "$WINEPREFIX/drive_c/users/"*/ 2>/dev/null | grep -viE '/Public/$' | head -1)
+    [ -n "$profile" ] || profile="$WINEPREFIX/drive_c/users/steamuser/"
+    printf '%s\n' \
+        "$WINEPREFIX/drive_c/ProgramData/Microsoft/Windows/Start Menu" \
+        "$profile/AppData/Roaming/Microsoft/Windows/Start Menu" \
+        "$profile/Desktop" \
+        "$WINEPREFIX/drive_c/users/Public/Desktop"
+}
+
+_list_shortcuts() {
+    local root
+    _shortcut_roots | while IFS= read -r root; do
+        [ -e "$root" ] && find -L "$root" -iname '*.lnk' 2>/dev/null
+    done | sort -u
+}
+
+# Turn every Start Menu / Desktop shortcut an installer just created into a
+# real Linux launcher that runs through Polycarbon, so installed Windows
+# programs land in the app menu exactly like they do on Windows. Called with
+# the shortcut listing captured before the run; only genuinely new entries
+# are registered, and icons extracted by Wine's own menu builder are reused.
+harvest_shortcuts() {
+    local before=$1 lnk name slug dest icon
+    mkdir -p "$APPS_DIR"
+    while IFS= read -r lnk; do
+        [ -n "$lnk" ] || continue
+        grep -qxF "$lnk" "$before" 2>/dev/null && continue
+        name=$(basename "$lnk" .lnk)
+        # Wine's own uninstaller entries are noise, not apps
+        case "$name" in *[Uu]ninstall*) continue ;; esac
+        slug=$(printf '%s' "$name" | tr -cs '[:alnum:]' '-' | tr '[:upper:]' '[:lower:]' | sed 's/^-//;s/-$//')
+        [ -n "$slug" ] || continue
+        dest="$APPS_DIR/polycarbon-$slug.desktop"
+        icon=$(_find_wine_icon "$name")
+        cat > "$dest" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$name
+Comment=Windows program via Polycarbon
+Exec="$SELF" "$lnk"
+Icon=${icon:-application-x-executable}
+Terminal=false
+Categories=Utility;X-Wine;
+X-Polycarbon=true
+EOF
+        notify "$name installed" "Added to your app menu" checkmark
+    done < <(_list_shortcuts)
+    command -v update-desktop-database >/dev/null && update-desktop-database "$APPS_DIR" 2>/dev/null || true
+}
+
+# Wine's winemenubuilder extracts each shortcut's real icon and writes its own
+# launcher under applications/wine/; steal that Icon line so our menu entry
+# looks right instead of falling back to a generic glyph
+_find_wine_icon() {
+    local name=$1 winedir="${XDG_DATA_HOME:-$HOME/.local/share}/applications/wine"
+    [ -d "$winedir" ] || return 0
+    grep -rlxF "Name=$name" "$winedir" 2>/dev/null | head -1 | xargs -r grep -m1 '^Icon=' | cut -d= -f2-
 }
 
 main() {
@@ -200,6 +352,10 @@ main() {
     : > "$LOG"
     ensure_ready
 
+    # Snapshot existing shortcuts so an installer's new ones can be spotted
+    local before="$BASE/.shortcuts.pre"
+    _list_shortcuts > "$before"
+
     # No launch notification — a working app appearing IS the feedback, like
     # on Windows. Only a fast nonzero exit (never got a window up) notifies;
     # apps returning nonzero after a real session are business as usual.
@@ -209,6 +365,11 @@ main() {
     if [ "$code" -ne 0 ] && [ $((SECONDS - started)) -lt 10 ]; then
         notify "$(basename "$target") did not start" "Exit code $code — log: $LOG" dialog-error
     fi
+
+    # An installer usually returns promptly and leaves shortcuts behind; wait
+    # briefly for winemenubuilder to flush its work, then register them
+    "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
+    harvest_shortcuts "$before"
     exit "$code"
 }
 
