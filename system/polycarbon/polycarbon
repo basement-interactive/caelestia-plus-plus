@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Windows app runner for Caelestia++. Registered as the double-click handler
+# Polycarbon — the Caelestia++ Windows app runner. Like glass, but fake:
+# looks and feels like the real thing.
+# Registered as the double-click handler
 # for .exe/.msi (see register.sh); everything needed to run the file is set
 # up on the spot, silently:
 #
@@ -37,7 +39,10 @@ GECKO_URL="https://dl.winehq.org/wine/wine-gecko/${GECKO_VER}/wine-gecko-${GECKO
 GECKO64_SHA256="e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f"
 GECKO32_SHA256="26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6"
 
-BASE="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/winrun"
+BASE="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/polycarbon"
+# Pre-rename installs keep their runner, prefix and apps — just moved over
+OLD_BASE="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/winrun"
+[ -d "$OLD_BASE" ] && [ ! -d "$BASE" ] && mv "$OLD_BASE" "$BASE"
 mkdir -p "$BASE"
 RUNNER_DIR="$BASE/runner"
 WINE="$RUNNER_DIR/bin/wine"
@@ -45,7 +50,7 @@ export WINEPREFIX="$BASE/prefix"
 LOG="$BASE/last-run.log"
 
 notify() { # title body [icon]
-    command -v notify-send >/dev/null && notify-send -a "Windows apps" -i "${3:-application-x-executable}" "$1" "$2"
+    command -v notify-send >/dev/null && notify-send -a "Polycarbon" -i "${3:-application-x-executable}" "$1" "$2"
 }
 
 die() {
@@ -176,7 +181,7 @@ run_target() {
 }
 
 main() {
-    [ $# -ge 1 ] || die "Nothing to run" "winrun expects a .exe, .msi or .lnk path"
+    [ $# -ge 1 ] || die "Nothing to run" "polycarbon expects a .exe, .msi or .lnk path"
 
     # System-scan fix path: full setup now, run nothing
     if [ "$1" = "--setup" ]; then

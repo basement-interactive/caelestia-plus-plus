@@ -95,11 +95,11 @@ Singleton {
             return;
         scanning = true;
         ShellUpdates.check();
-        // Idempotent desktop integration for the Windows app runner runs
+        // Idempotent desktop integration for Polycarbon runs
         // first (fast, self-heals a wiped mimeapps.list); the probes it
         // affects start when it exits
-        winrunRegister.command = ["bash", Quickshell.shellPath("system/winrun/register.sh"), Quickshell.shellDir];
-        winrunRegister.running = true;
+        polycarbonRegister.command = ["bash", Quickshell.shellPath("system/polycarbon/register.sh"), Quickshell.shellDir];
+        polycarbonRegister.running = true;
     }
 
     function _launchProbes(): void {
@@ -364,23 +364,23 @@ Singleton {
             });
         }
 
-        // -- Windows app runner
-        const [wrVer, wrPrefix, wrComp] = flags.winrun ?? [];
-        const winrunSetupFix = Object.assign({label: qsTr("Set up")}, _userFix(qsTr("Downloads the Soda runner plus the full compatibility stack (wine-mono for .NET, wine-gecko for embedded HTML, DXVK and VKD3D-Proton for Direct3D 8-12 on Vulkan machines) — all checksum-pinned, all unattended. Everything lives under ~/.local/share/caelestia/winrun; nothing system-wide changes."), [`bash '${Quickshell.shellDir}/system/winrun/winrun' --setup`]));
+        // -- Polycarbon (Windows app runner)
+        const [wrVer, wrPrefix, wrComp] = flags.polycarbon ?? [];
+        const polycarbonSetupFix = Object.assign({label: qsTr("Set up")}, _userFix(qsTr("Downloads the Soda runner plus the full compatibility stack (wine-mono for .NET, wine-gecko for embedded HTML, DXVK and VKD3D-Proton for Direct3D 8-12 on Vulkan machines) — all checksum-pinned, all unattended. Everything lives under ~/.local/share/caelestia/polycarbon; nothing system-wide changes."), [`bash '${Quickshell.shellDir}/system/polycarbon/polycarbon' --setup`]));
         if (wrVer && wrVer !== "none" && wrComp !== "none")
-            push("winrun", qsTr("Windows app runner ready"), qsTr("%1 with .NET, HTML and Direct3D support — double-click any .exe and it runs (64- and 32-bit)").arg(wrVer), "ok");
+            push("polycarbon", qsTr("Polycarbon ready"), qsTr("%1 with .NET, HTML and Direct3D support — double-click any .exe and it runs (64- and 32-bit)").arg(wrVer), "ok");
         else if (wrVer && wrVer !== "none")
-            push("winrun", qsTr("Windows runner missing its component stack"), qsTr("The runner works, but .NET/HTML/Direct3D components are not in yet — the next .exe launch installs them, or do it now"), "info", {
-                fix: winrunSetupFix
+            push("polycarbon", qsTr("Polycarbon missing its component stack"), qsTr("The runner works, but .NET/HTML/Direct3D components are not in yet — the next .exe launch installs them, or do it now"), "info", {
+                fix: polycarbonSetupFix
             });
         else
-            push("winrun", qsTr("Windows app runner not downloaded yet"), qsTr("The first .exe double-click sets everything up by itself (~200 MB, one time) — or grab it now so that first launch is instant"), "info", {
-                fix: winrunSetupFix
+            push("polycarbon", qsTr("Polycarbon (Windows apps) not downloaded yet"), qsTr("The first .exe double-click sets everything up by itself (~200 MB, one time) — or grab it now so that first launch is instant"), "info", {
+                fix: polycarbonSetupFix
             });
-        const wrKept = parseInt(flags.winrunmime?.[0] ?? "0", 10);
+        const wrKept = parseInt(flags.polycarbonmime?.[0] ?? "0", 10);
         if (wrKept > 0)
-            push("winrun-mime", qsTr("%n Windows file type(s) open elsewhere", "", wrKept), qsTr("%1— double-clicks go to that app instead of the Caelestia runner").arg(flags.winrunmime?.[1] ?? ""), "info", {
-                fix: Object.assign({label: qsTr("Take over")}, _userFix(qsTr("Makes the Caelestia runner the default for .exe/.msi double-clicks. Only file associations change (your other launcher keeps working when opened directly); rerunnable the other way from that app's settings."), [`bash '${Quickshell.shellDir}/system/winrun/register.sh' '${Quickshell.shellDir}' --force`]))
+            push("polycarbon-mime", qsTr("%n Windows file type(s) open elsewhere", "", wrKept), qsTr("%1— double-clicks go to that app instead of Polycarbon").arg(flags.polycarbonmime?.[1] ?? ""), "info", {
+                fix: Object.assign({label: qsTr("Take over")}, _userFix(qsTr("Makes Polycarbon the default for .exe/.msi double-clicks. Only file associations change (your other launcher keeps working when opened directly); rerunnable the other way from that app's settings."), [`bash '${Quickshell.shellDir}/system/polycarbon/register.sh' '${Quickshell.shellDir}' --force`]))
             });
 
         const dirty = parseInt(flags.gitdirty?.[0] ?? "0", 10);
@@ -608,7 +608,7 @@ Singleton {
     }
 
     Process {
-        id: winrunRegister
+        id: polycarbonRegister
 
         onExited: root._launchProbes()
     }
