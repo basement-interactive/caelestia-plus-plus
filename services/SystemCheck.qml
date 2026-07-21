@@ -383,6 +383,39 @@ Singleton {
                 fix: Object.assign({label: qsTr("Take over")}, _userFix(qsTr("Makes Polycarbon the default for .exe/.msi double-clicks. Only file associations change (your other launcher keeps working when opened directly); rerunnable the other way from that app's settings."), [`bash '${Quickshell.shellDir}/system/polycarbon/register.sh' '${Quickshell.shellDir}' --force`]))
             });
 
+        // -- Notification daemon ownership
+        // Only the process owning org.freedesktop.Notifications draws notifs.
+        // If it isn't this quickshell, the shell's own notifications never
+        // show and a foreign daemon's popups appear instead.
+        const [notifOwner, notifUnit] = flags.notifowner ?? [];
+        const ownedByShell = notifOwner === "qs" || notifOwner === "quickshell";
+        if (notifOwner && notifOwner !== "none" && !ownedByShell) {
+            // Stop a real daemon unit for good (disable + mask); otherwise just
+            // kill the process. Either way, relaunch the shell — detached so it
+            // survives its own restart — to claim the freed name.
+            const killCmds = [];
+            let summary = qsTr("Another notification daemon, %1, currently owns the notification service, so Caelestia++'s own notifications can't appear — you see that daemon's plain popups instead. ").arg(notifOwner);
+            if (notifUnit) {
+                killCmds.push(`systemctl --user disable --now '${notifUnit}'`);
+                killCmds.push(`systemctl --user mask '${notifUnit}'`);
+                summary += qsTr("This stops and masks its user service (%1) so it stays gone, ").arg(notifUnit);
+            } else {
+                killCmds.push(`pkill -x '${notifOwner}' || true`);
+                summary += qsTr("This stops it now (it has no systemd unit — if it comes back after a reboot, remove it from your Hyprland exec-once), ");
+            }
+            summary += qsTr("then reloads the shell so Caelestia++ takes over notifications.");
+            killCmds.push("setsid sh -c 'sleep 1; pkill -x qs; sleep 1; caelestia shell -d' >/dev/null 2>&1 &");
+            push("notif-daemon", qsTr("Notifications hijacked by %1").arg(notifOwner), qsTr("%1 owns the notification service — Caelestia++'s notifications don't show, its popups do (that plain look)").arg(notifOwner), "warn", {
+                fix: Object.assign({label: qsTr("Reclaim")}, _userFix(summary, killCmds))
+            });
+        } else if (notifOwner === "none") {
+            push("notif-daemon", qsTr("No notification server running"), qsTr("Nothing owns the notification service yet — reload the shell so Caelestia++ can claim it"), "warn", {
+                fix: Object.assign({label: qsTr("Reload")}, _userFix(qsTr("Reloads the shell so its notification server binds the free notification service name."), ["setsid sh -c 'sleep 1; pkill -x qs; sleep 1; caelestia shell -d' >/dev/null 2>&1 &"]))
+            });
+        } else {
+            push("notif-daemon", qsTr("Notifications handled by Caelestia++"), qsTr("The shell owns the notification service — its own notifications show"), "ok");
+        }
+
         const dirty = parseInt(flags.gitdirty?.[0] ?? "0", 10);
         push("git-dirty", dirty > 0 ? qsTr("Shell checkout has %1 modified files").arg(dirty) : qsTr("Shell checkout clean"), dirty > 0 ? qsTr("Local edits are fine, but they can conflict with updates — no automatic action") : qsTr("No local modifications"), dirty > 0 ? "info" : "ok");
 

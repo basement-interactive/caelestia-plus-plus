@@ -74,6 +74,25 @@ for t in application/x-ms-dos-executable application/vnd.microsoft.portable-exec
 done
 echo "polycarbonmime|$(printf '%s' "$wk" | wc -w)|$(printf '%s' "$wk" | tr '|' '/')"
 
+# --- Notification daemon ownership ---------------------------------------------
+# Whoever owns org.freedesktop.Notifications on the session bus renders every
+# notification. If that is not this quickshell, the shell's own (much nicer)
+# notifications never appear — a stray dunst/mako/swaync grabbed the name
+# first. Report the owning process and, if it is a systemd user unit, which
+# one, so the scan can offer to stop it and hand notifications back.
+nowner=$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner s org.freedesktop.Notifications 2>/dev/null | awk '{print $2}' | tr -d '"')
+ncomm=""; nunit=""
+if [ -n "$nowner" ]; then
+    npid=$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetConnectionUnixProcessID s "$nowner" 2>/dev/null | awk '{print $2}')
+    [ -n "$npid" ] && ncomm=$(tr -d '\0' < "/proc/$npid/comm" 2>/dev/null)
+    # Only a dedicated daemon unit is safe to mask. A daemon started from the
+    # compositor's exec-once shares the compositor's own cgroup unit
+    # (wayland-wm@…, graphical-session, the session scope) — masking that
+    # would kill the desktop, so those are never treated as the culprit unit.
+    [ -n "$npid" ] && nunit=$(grep -oE '[a-zA-Z0-9@._-]+\.service' "/proc/$npid/cgroup" 2>/dev/null | grep -viE 'user@|init\.scope|wayland-wm|graphical-session|hyprland|plasma|gnome-session|session\.slice' | head -1)
+fi
+echo "notifowner|${ncomm:-none}|${nunit}"
+
 # --- Hyprland ----------------------------------------------------------------
 hc=$(timeout 5 hyprctl configerrors 2>/dev/null | grep -vi 'no errors' | grep .) || true
 echo "hyprerr|$(printf '%s' "$hc" | grep -c .)|$(printf '%s' "$hc" | head -1 | cut -c1-140 | tr '|' '/')"
