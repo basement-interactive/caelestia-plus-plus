@@ -167,13 +167,19 @@ POLY_ENV="$BASE/env"
 if [ ! -f "$POLY_ENV" ]; then
     cat > "$POLY_ENV" <<'ENVTPL'
 # Polycarbon per-machine tuning. Uncomment a line to apply it to every
-# Windows program. Nothing here is set by default.
+# Windows program. Nothing here is set by default. Try these top-to-bottom
+# if a program crashes at startup on this machine.
 
-# Multi-GPU machine (a discrete card + integrated graphics)? If apps crash at
-# startup or render on the wrong GPU, force the discrete one:
+# 1. Multi-GPU machine (a discrete card + integrated graphics)? If apps crash
+#    at startup or render on the wrong GPU, force the discrete one:
 #export DRI_PRIME=1
 
-# fsync misbehaving on this kernel (rare crashes at launch)?
+# 2. Still crashing at graphics init? Route Direct3D through OpenGL instead of
+#    Vulkan (skips DXVK/VKD3D — slower for games, but dodges Vulkan/multi-GPU
+#    driver bugs):
+#export WINEDLLOVERRIDES="d3d9,d3d10core,d3d11,dxgi=b"
+
+# 3. fsync misbehaving on this kernel (rare crashes at launch)?
 #export WINEFSYNC=0
 
 # Write the list of Vulkan devices into last-run.log for diagnosis:
@@ -696,14 +702,32 @@ Full log: $LOG" dialog-error
     # (never got going); a nonzero exit after a real session is a normal quit.
     local had_app_logs=""
     collect_app_logs "$(dirname "$target")" "$marker" && had_app_logs=1
-    local err
+    local err failed=""
     err=$(salient_error)
     if [ -n "$err" ]; then
         logmsg "FAILED: $err"
-        notify "$(basename "$target") crashed" "$err
-Full log: $LOG" dialog-error
+        failed=1
     elif [ "$code" -ne 0 ] && [ $((SECONDS - started)) -lt 10 ]; then
-        notify "$(basename "$target") did not start" "Exited with code $code and no window.${had_app_logs:+ Its own log was captured.}
+        failed=1
+    fi
+
+    # A crash on a machine with more than one GPU, where no GPU has been
+    # pinned yet, is almost always the two cards fighting over device
+    # selection — point straight at the one-line fix instead of leaving the
+    # user to guess. (Only a hint; nothing is changed automatically, because
+    # which GPU is right is machine-specific.)
+    local hint=""
+    if [ -n "$failed" ] && [ -z "${DRI_PRIME:-}" ] && [ "$(grep -acE 'Found device: ' "$LOG")" -ge 2 ]; then
+        hint="
+Multiple GPUs detected — likely cause. Try: echo 'export DRI_PRIME=1' >> $POLY_ENV   (then relaunch). More options in that file."
+        logmsg "HINT: multiple GPUs present and none pinned — try DRI_PRIME=1 in $POLY_ENV"
+    fi
+
+    if [ -n "$err" ]; then
+        notify "$(basename "$target") crashed" "$err$hint
+Full log: $LOG" dialog-error
+    elif [ -n "$failed" ]; then
+        notify "$(basename "$target") did not start" "Exited with code $code and no window.${had_app_logs:+ Its own log was captured.}$hint
 Full log: $LOG" dialog-error
     fi
 
