@@ -356,10 +356,20 @@ check_runner_update() {
         touch "$stamp"                            # up to date — throttle the next check
         return 0
     fi
-    if pgrep -f "$RUNNER_DIR/bin/wineserver" >/dev/null 2>&1; then
-        say "runtime $tag available - applied on next launch (apps running now)"
-        return 0                                  # deferred — no stamp, retry next idle launch
-    fi
+    # Never swap the runtime out from under a live app. But a wineserver that
+    # just lost its last client lingers idle for a few seconds — that is NOT a
+    # running app, so give it a moment to exit before deciding to defer (its
+    # stale clients were already cleared at launch). A real app keeps it alive
+    # and we defer to the next idle launch.
+    local waited=0
+    while pgrep -f "$RUNNER_DIR/bin/wineserver" >/dev/null 2>&1; do
+        [ "$waited" -ge 6 ] && {
+            say "runtime $tag available - applied on next launch (an app is running now)"
+            return 0
+        }
+        sleep 1
+        waited=$((waited + 1))
+    done
     notify "Updating Windows apps" "New runtime $tag — a moment…" folder-download
     runner_install_tag "$tag"
     touch "$stamp"
@@ -850,6 +860,11 @@ Full log: $LOG" dialog-error
     new_log
     [ -e "$target" ] || die "File not found" "$target"
     logmsg "launching $(basename "$target")"
+    # Clear leftover instances of THIS program up front, before setup runs:
+    # stale copies keep wineserver alive, and the runtime auto-updater defers
+    # whenever it sees Wine running — so zombies would block the auto-update
+    # forever (the exact reason a runtime got stuck and needed a manual update).
+    kill_stale "$(basename "$target")"
     ensure_ready
 
     # Bridge protocols the program registered on a previous run/install BEFORE
@@ -873,8 +888,6 @@ Full log: $LOG" dialog-error
     local -a appargs=("$@")
     local qf="$QUIRKS_DIR/$exe.env"
     mkdir -p "$QUIRKS_DIR"
-    # Clean slate: no leftover instances of this program contaminating the run
-    kill_stale "$exe"
     # Prevention: a fix learned on a past run is applied from the very first
     # launch, so a program that once crashed just starts.
     local learned=""
