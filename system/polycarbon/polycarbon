@@ -29,11 +29,17 @@
 # notifications, never as terminal output or dialogs.
 set -u
 
-# Always Kron4ek's builds, always the latest release. Staging is the bleeding
-# edge of upstream (current, complete, fsync-enabled); Soda 9.0 before it was
-# a stripped 2024 gaming build that crashed real desktop apps like Telegram.
+# Always Kron4ek's builds, always the latest release of the Proton line
+# (Valve's Wine — what Steam ships). Chosen over upstream staging because
+# Valve implements Windows APIs upstream still stubs: notably
+# Windows.Gaming.Input's NonRoamableId, which upstream (even master) returns
+# E_NOTIMPL for — any gilrs/gamepad-using program hard-crashes on it the
+# moment a controller is plugged in. Proton also carries fsync and the
+# broadest game/app compatibility in practice. Stable proton tags only
+# (proton-X.Y-N); exp/beta are excluded.
 RUNNER_REPO="Kron4ek/Wine-Builds"
-RUNNER_FLAVOR="staging-amd64-wow64"
+RUNNER_TAG_PATTERN='^proton-[0-9]+\.[0-9]+-[0-9]+$'
+RUNNER_FLAVOR="amd64-wow64"
 RUNNER_CHECK_SECONDS=86400
 
 # Bump when anything in the component set below changes; installed prefixes
@@ -200,9 +206,33 @@ vulkan_ok() {
     ls /usr/share/vulkan/icd.d/*.json >/dev/null 2>&1
 }
 
-# Latest release tag from the pinned repo, empty on network failure
+# The one Windows.Gaming.Input call NO Wine variant implements for real
+# controllers: RawGameController::NonRoamableId returns E_NOTIMPL (upstream
+# stubs it outright; Proton only implements it for Steam's virtual pad).
+# gilrs-based programs hard-unwrap that call, so with any gamepad plugged in
+# they crash on launch. The cure: disable the WGI dll for THAT PROGRAM ONLY —
+# gamepad libraries handle the API being absent (their error path, unlike the
+# unwrap, is graceful) and fall back, while XInput/DirectInput pads in other
+# programs keep working. Detected and applied automatically, then retried.
+wgi_crash_in_log() {
+    grep -aqE 'windows_wgi.*panicked|NonRoamableId|HRESULT\(0x80004001\)' "$LOG"
+}
+
+wgi_workaround_present() { # exe-basename
+    "$WINE" reg query "HKCU\\Software\\Wine\\AppDefaults\\$1\\DllOverrides" /v "windows.gaming.input" >/dev/null 2>&1
+}
+
+apply_wgi_workaround() { # exe-basename
+    "$WINE" reg add "HKCU\\Software\\Wine\\AppDefaults\\$1\\DllOverrides" /v "windows.gaming.input" /d "" /f >>"$LOG" 2>&1
+    "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
+}
+
+# Newest release tag of the chosen line, empty on network failure. The
+# Proton builds live in their own tags (not releases/latest), so scan the
+# release list — newest first — for the first stable-pattern match.
 runner_latest_tag() {
-    curl -fsSL --max-time 8 "https://api.github.com/repos/$RUNNER_REPO/releases/latest" 2>/dev/null | grep -m1 '"tag_name"' | cut -d'"' -f4
+    curl -fsSL --max-time 8 "https://api.github.com/repos/$RUNNER_REPO/releases?per_page=30" 2>/dev/null \
+        | grep -oE '"tag_name": *"[^"]+"' | cut -d'"' -f4 | grep -E "$RUNNER_TAG_PATTERN" | head -1
 }
 
 # Download and swap in the given release. Integrity comes from the release's
@@ -689,27 +719,43 @@ Full log: $LOG" dialog-error
     local marker="$BASE/.launch-marker"
     : > "$marker"
 
-    local started=$SECONDS
-    run_target "$target" "$@"
-    local code=$?
-    logmsg "$(basename "$target") exited with code $code after $((SECONDS - started))s"
+    # Launch, wait, diagnose — twice at most: if the first run dies on the
+    # known gamepad-API crash, the per-program workaround is applied and the
+    # program restarted without the user doing anything.
+    local code started had_app_logs err failed attempt
+    for attempt in 1 2; do
+        started=$SECONDS
+        run_target "$target" "$@"
+        code=$?
+        logmsg "$(basename "$target") exited with code $code after $((SECONDS - started))s"
 
-    # Diagnose the exit. Fold in the program's own logs first so the reason it
-    # crashed (which it writes to its own file, not our stdout) is captured and
-    # searchable. A recognisable error is then always surfaced with the actual
-    # reason — no matter how long the app ran — so a failure is never a silent
-    # black box. A quiet nonzero exit is only flagged if it happened fast
-    # (never got going); a nonzero exit after a real session is a normal quit.
-    local had_app_logs=""
-    collect_app_logs "$(dirname "$target")" "$marker" && had_app_logs=1
-    local err failed=""
-    err=$(salient_error)
-    if [ -n "$err" ]; then
-        logmsg "FAILED: $err"
-        failed=1
-    elif [ "$code" -ne 0 ] && [ $((SECONDS - started)) -lt 10 ]; then
-        failed=1
-    fi
+        # Many apps hand off to a second process and exit 0 immediately
+        # (Electron launchers do — Vortex 'runs and closes' while the real
+        # process lives on, and its crash output lands in the log AFTER the
+        # wrapper returned). Wait for every process on the prefix to finish
+        # before diagnosing, so late output and late crashes are in the log
+        # when it is scanned.
+        "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
+        logmsg "all processes finished"
+
+        # Fold in the program's own logs so the reason it crashed (written to
+        # its own file, not our stdout) is captured and searchable
+        had_app_logs=""
+        collect_app_logs "$(dirname "$target")" "$marker" && had_app_logs=1
+        err=$(salient_error)
+        failed=""
+        if [ -n "$err" ]; then
+            logmsg "FAILED: $err"
+            failed=1
+        elif [ "$code" -ne 0 ] && [ $((SECONDS - started)) -lt 10 ]; then
+            failed=1
+        fi
+
+        [ -n "$failed" ] && [ "$attempt" = 1 ] && wgi_crash_in_log && ! wgi_workaround_present "$(basename "$target")" || break
+        logmsg "known gamepad-API crash — disabling that API for $(basename "$target") only and restarting"
+        notify "Fixing $(basename "$target")" "Hit a known gamepad-API incompatibility — applying a one-time workaround and restarting it…" preferences-system
+        apply_wgi_workaround "$(basename "$target")"
+    done
 
     # A crash on a machine with more than one GPU, where no GPU has been
     # pinned yet, is almost always the two cards fighting over device
@@ -731,9 +777,8 @@ Full log: $LOG" dialog-error
 Full log: $LOG" dialog-error
     fi
 
-    # An installer usually returns promptly and leaves shortcuts behind; wait
-    # briefly for winemenubuilder to flush its work, then register them
-    "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
+    # Everything on the prefix has already been waited out above; register any
+    # shortcuts and protocols the run left behind
     harvest_shortcuts "$before"
     harvest_schemes
     exit "$code"
