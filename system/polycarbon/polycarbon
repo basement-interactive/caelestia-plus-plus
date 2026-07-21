@@ -455,6 +455,48 @@ _find_wine_icon() {
     grep -rlxF "Name=$name" "$winedir" 2>/dev/null | head -1 | xargs -r grep -m1 '^Icon=' | cut -d= -f2-
 }
 
+# URL protocols Windows programs register (vortex://, nxm://, …) live only in
+# the prefix registry — a Linux browser never sees them. Bridge each one to a
+# Linux scheme handler that routes the link back here (--url), so "open in
+# app" buttons on websites reach the Windows program like they would on
+# Windows. Web/system schemes are never touched, and a scheme some Linux app
+# already handles is left alone (native Steam keeps steam://, and so on).
+harvest_schemes() {
+    local reg scheme handler entry
+    for scheme in $(awk '
+        /^\[/ { sec = $0 }
+        /"URL Protocol"/ {
+            if (sec ~ /^\[Software\\\\Classes\\\\[a-zA-Z][a-zA-Z0-9+.-]*\]/) {
+                sub(/^\[Software\\\\Classes\\\\/, "", sec)
+                sub(/\].*/, "", sec)
+                print tolower(sec)
+            }
+        }' "$WINEPREFIX/system.reg" "$WINEPREFIX/user.reg" 2>/dev/null | sort -u); do
+        case "$scheme" in
+        http | https | ftp | ftps | file | mailto | news | nntp | irc | ircs | tel | sms | about | javascript | res | mk | ms-* | microsoft* | windows* | x-scheme-handler*)
+            continue
+            ;;
+        esac
+        entry="polycarbon-scheme-$scheme.desktop"
+        handler=$(xdg-mime query default "x-scheme-handler/$scheme" 2>/dev/null)
+        [ -n "$handler" ] && [ "$handler" != "$entry" ] && continue
+        [ -f "$APPS_DIR/$entry" ] && [ "$handler" = "$entry" ] && continue
+        cat > "$APPS_DIR/$entry" <<EOF
+[Desktop Entry]
+Type=Application
+Name=${scheme^} link (Polycarbon)
+Comment=Opens $scheme:// links in the Windows program that registered them
+Exec="$SELF" --url %u
+Icon=application-x-executable
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/$scheme;
+EOF
+        xdg-mime default "$entry" "x-scheme-handler/$scheme"
+        notify "${scheme^} links connected" "$scheme:// links from your browser now open the Windows program" checkmark
+    done
+}
+
 main() {
     [ $# -ge 1 ] || die "Nothing to run" "polycarbon expects a .exe, .msi or .lnk path"
 
@@ -463,8 +505,20 @@ main() {
         SETUP_MODE=1
         : > "$LOG"
         ensure_ready
+        harvest_schemes
         say "ready - double-click any .exe"
         exit 0
+    fi
+
+    # Browser protocol launch (vortex://…): hand the URI to the handler the
+    # Windows program registered inside the prefix
+    if [ "$1" = "--url" ]; then
+        shift
+        [ $# -ge 1 ] || die "Nothing to open" "no link given"
+        : > "$LOG"
+        ensure_ready
+        "$WINE" start "$1" >>"$LOG" 2>&1
+        exit $?
     fi
 
     local target
@@ -493,6 +547,7 @@ main() {
     # briefly for winemenubuilder to flush its work, then register them
     "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
     harvest_shortcuts "$before"
+    harvest_schemes
     exit "$code"
 }
 
