@@ -29,17 +29,19 @@
 # notifications, never as terminal output or dialogs.
 set -u
 
-# Always Kron4ek's builds, always the latest release of the Proton line
-# (Valve's Wine — what Steam ships). Chosen over upstream staging because
-# Valve implements Windows APIs upstream still stubs: notably
-# Windows.Gaming.Input's NonRoamableId, which upstream (even master) returns
-# E_NOTIMPL for — any gilrs/gamepad-using program hard-crashes on it the
-# moment a controller is plugged in. Proton also carries fsync and the
-# broadest game/app compatibility in practice. Stable proton tags only
-# (proton-X.Y-N); exp/beta are excluded.
+# Always Kron4ek's builds, always the latest wine-staging release. Staging —
+# not the Proton line: Proton is Valve's gaming Wine and its fullscreen/DPI
+# hack patches broke real desktop apps (Telegram fastfailed with c0000409
+# right after EnableNonClientDpiScaling on a mixed-DPI multi-monitor host —
+# an app verified working on staging). Same lesson as the original Soda
+# runner: gaming builds sacrifice desktop-app correctness. Staging is current,
+# complete, and still fsync-enabled; the one thing Proton had over it
+# (Windows.Gaming.Input's NonRoamableId, stubbed in staging) is covered by
+# the wgi_off recovery rung. Version tags only (X.Y); proton-*/exp/beta
+# releases are excluded.
 RUNNER_REPO="Kron4ek/Wine-Builds"
-RUNNER_TAG_PATTERN='^proton-[0-9]+\.[0-9]+-[0-9]+$'
-RUNNER_FLAVOR="amd64-wow64"
+RUNNER_TAG_PATTERN='^[0-9]+\.[0-9]+$'
+RUNNER_FLAVOR="staging-amd64-wow64"
 RUNNER_CHECK_SECONDS=86400
 
 # Bump when anything in the component set below changes; installed prefixes
@@ -337,7 +339,7 @@ check_runner_update() {
     local force=${1:-}
     local stamp="$BASE/.update-check"
     # A runner from a DIFFERENT line (the configured build just changed — e.g.
-    # staging -> proton) must switch on the next launch, not wait out the daily
+    # proton -> staging) must switch on the next launch, not wait out the daily
     # throttle: its version won't match the current line's tag pattern.
     local installed; installed=$(cat "$BASE/runner.version" 2>/dev/null)
     if [ -n "$installed" ] && ! printf '%s' "$installed" | grep -qE "$RUNNER_TAG_PATTERN"; then
