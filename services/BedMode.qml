@@ -3,7 +3,6 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import Quickshell.Services.UPower
 import Caelestia
 import qs.services
 import qs.utils
@@ -31,7 +30,7 @@ Singleton {
 
         if (value) {
             MaxPerf.setEnabled(false); // opposite fan curves; never both
-            PowerProfiles.profile = PowerProfile.Balanced;
+            PowerDaemon.setProfile("balanced");
         }
 
         Toaster.toast(value ? qsTr("Bed mode enabled") : qsTr("Bed mode disabled"), value ? qsTr("Aggressive fan curve on, CPU boost off") : qsTr("Fan curve and CPU boost restored"), "bed");

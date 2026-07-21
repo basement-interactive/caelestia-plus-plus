@@ -35,14 +35,14 @@ Column {
             return comps.join(", ") || fallback;
         }
 
-        text: UPower.displayDevice.isLaptopBattery ? qsTr("Time %1: %2").arg(UPower.onBattery ? "remaining" : "until charged").arg(UPower.onBattery ? formatSeconds(UPower.displayDevice.timeToEmpty, "Calculating...") : formatSeconds(UPower.displayDevice.timeToFull, "Fully charged!")) : qsTr("Power profile: %1").arg(PowerProfile.toString(PowerProfiles.profile))
+        text: UPower.displayDevice.isLaptopBattery ? qsTr("Time %1: %2").arg(UPower.onBattery ? "remaining" : "until charged").arg(UPower.onBattery ? formatSeconds(UPower.displayDevice.timeToEmpty, "Calculating...") : formatSeconds(UPower.displayDevice.timeToFull, "Fully charged!")) : qsTr("Power profile: %1").arg(PowerDaemon.profileLabel)
     }
 
     Loader {
         asynchronous: true
         anchors.horizontalCenter: parent.horizontalCenter
 
-        active: PowerProfiles.degradationReason !== PerformanceDegradationReason.None
+        active: PowerDaemon.degradation !== ""
 
         height: active ? ((item as Item)?.implicitHeight ?? 0) : 0
 
@@ -89,7 +89,7 @@ Column {
                 StyledText {
                     anchors.horizontalCenter: parent.horizontalCenter
 
-                    text: qsTr("Reason: %1").arg(PerformanceDegradationReason.toString(PowerProfiles.degradationReason))
+                    text: qsTr("Reason: %1").arg(PowerDaemon.degradation)
                     color: Colours.palette.m3onError
                 }
             }
@@ -102,10 +102,10 @@ Column {
         property string current: {
             if (Dynamic.enabled)
                 return dyn.icon;
-            const p = PowerProfiles.profile;
-            if (p === PowerProfile.PowerSaver)
+            const p = PowerDaemon.profile;
+            if (p === "power-saver")
                 return saver.icon;
-            if (p === PowerProfile.Performance)
+            if (p === "performance")
                 return perf.icon;
             return balance.icon;
         }
@@ -158,7 +158,7 @@ Column {
             anchors.left: parent.left
             anchors.leftMargin: Tokens.padding.extraSmall
 
-            profile: PowerProfile.PowerSaver
+            profile: "power-saver"
             icon: "energy_savings_leaf"
         }
 
@@ -169,7 +169,7 @@ Column {
             anchors.left: saver.right
             anchors.leftMargin: Tokens.spacing.largeIncreased
 
-            profile: PowerProfile.Balanced
+            profile: "balanced"
             icon: "balance"
         }
 
@@ -180,7 +180,7 @@ Column {
             anchors.left: balance.right
             anchors.leftMargin: Tokens.spacing.largeIncreased
 
-            profile: PowerProfile.Performance
+            profile: "performance"
             icon: "rocket_launch"
         }
 
@@ -194,6 +194,16 @@ Column {
             dynamic: true
             icon: "auto_mode"
         }
+    }
+
+    StyledText {
+        width: root.width
+        visible: !PowerDaemon.ready
+
+        text: qsTr("Power daemon unreachable — reconnecting; your choice applies when it's back")
+        color: Colours.palette.m3error
+        font: Tokens.font.body.small
+        wrapMode: Text.WordWrap
     }
 
     StyledText {
@@ -273,7 +283,7 @@ Column {
 
     component Profile: Item {
         required property string icon
-        property int profile: -1
+        property string profile: ""
         property bool dynamic: false
 
         implicitWidth: icon.implicitHeight + Tokens.padding.small
@@ -289,7 +299,7 @@ Column {
                     Dynamic.setEnabled(true);
                 } else {
                     Dynamic.setEnabled(false);
-                    PowerProfiles.profile = parent.profile;
+                    PowerDaemon.setProfile(parent.profile);
                 }
             }
         }

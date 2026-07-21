@@ -37,9 +37,7 @@ Singleton {
             BedMode.setEnabled(false);
             Dynamic.setEnabled(false); // Dynamic and Max-perf both drive the profile; never both
         }
-        // Not PowerProfiles.profile: quickshell's UPower service mis-detects
-        // performance as unavailable on this machine (ppd has it fine).
-        Quickshell.execDetached(["powerprofilesctl", "set", value ? "performance" : "balanced"]);
+        PowerDaemon.setProfile(value ? "performance" : "balanced");
         GameMode.enabled = value;
 
         if (value && !root.installed && !root.installing) {
