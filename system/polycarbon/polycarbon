@@ -548,6 +548,61 @@ ensure_ready() {
     flock -u 9
 }
 
+# A GUI program that neither opens a window nor exits is HUNG (a graphics
+# deadlock on a multi-GPU box does exactly this) — recovery can only help if
+# we stop waiting on it. run_with_watchdog launches the program and watches
+# for one of three outcomes: a window appears (it works — wait for the user to
+# close it, so installers still harvest), everything exits (it crashed/
+# finished — diagnose), or the grace window passes with no window and it's
+# still alive (hung — kill it and report 124 so recovery moves on). Installers
+# legitimately run windowless, so they skip the watchdog and just block.
+WATCHDOG_GRACE=${POLYCARBON_GRACE:-40}
+
+_win_addrs() {
+    command -v hyprctl >/dev/null 2>&1 || return 0
+    hyprctl clients -j 2>/dev/null | grep -oE '"address": *"[^"]+"' | sort -u
+}
+
+_new_window_since() { # $1 = window addresses captured before launch
+    [ -n "$(comm -13 <(printf '%s\n' "$1") <(_win_addrs) 2>/dev/null)" ]
+}
+
+_prefix_busy() { pgrep -f "$RUNNER_DIR/bin/wine" >/dev/null 2>&1; }
+
+is_installer() {
+    case "${1,,}" in
+    *.msi) return 0 ;;
+    *setup*|*install*|*_inst.exe|*inst.exe) return 0 ;;
+    esac
+    return 1
+}
+
+# $1 learned-env, $2 rung-env. Reads $target/$exe/$appargs from the caller
+# (bash dynamic scope). Returns 0 = ran/worked, 124 = hung, else exit code.
+run_with_watchdog() {
+    local learned=$1 extra=$2
+    local before; before=$(_win_addrs)
+    ( eval "$learned"; eval "$extra"; run_target "$target" "${appargs[@]}" ) &
+    local launcher=$! t=0
+    while :; do
+        if _new_window_since "$before"; then
+            wait "$launcher" 2>/dev/null      # window up: real session, block till closed
+            "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
+            return 0
+        fi
+        if ! kill -0 "$launcher" 2>/dev/null && ! _prefix_busy; then
+            wait "$launcher"; return $?        # fully exited, nothing lingering
+        fi
+        if [ "$t" -ge "$WATCHDOG_GRACE" ]; then
+            logmsg "$exe never opened a window in ${WATCHDOG_GRACE}s and is still running — treating as hung"
+            "$RUNNER_DIR/bin/wineserver" -k >/dev/null 2>&1
+            wait "$launcher" 2>/dev/null
+            return 124
+        fi
+        sleep 1; t=$((t + 1))
+    done
+}
+
 run_target() {
     local target=$1
     shift
@@ -799,6 +854,7 @@ Full log: $LOG" dialog-error
     : > "$marker"
 
     local exe; exe=$(basename "$target")
+    local -a appargs=("$@")
     local qf="$QUIRKS_DIR/$exe.env"
     mkdir -p "$QUIRKS_DIR"
     # Prevention: a fix learned on a past run is applied from the very first
@@ -832,28 +888,33 @@ Full log: $LOG" dialog-error
         : > "$marker"
         rung_start=$(wc -l <"$LOG" 2>/dev/null || echo 0)
         started=$SECONDS
-        # Learned fixes + this rung's tweak apply to THIS launch only
-        ( eval "$learned"; eval "$extra"; run_target "$target" "$@" )
-        code=$?
-        # Late handoff: an Electron-style launcher exits 0 in ~1s while the
-        # real process crashes after — wait for the whole prefix to settle so
-        # late output and late crashes are in the log before we judge it.
-        "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
-        logmsg "$exe exited with code $code after $((SECONDS - started))s; all processes finished"
+        # Installers run windowless and exit on their own — block on them.
+        # Everything else goes through the watchdog so a hang can't stall us.
+        if is_installer "$target"; then
+            ( eval "$learned"; eval "$extra"; run_target "$target" "${appargs[@]}" )
+            code=$?
+            "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
+        else
+            run_with_watchdog "$learned" "$extra"
+            code=$?
+        fi
+        logmsg "$exe finished/settled with code $code after $((SECONDS - started))s"
 
         had_app_logs=""
         collect_app_logs "$(dirname "$target")" "$marker" && had_app_logs=1
         # This attempt's output only — everything the log grew by since launch
         tail -n +$((rung_start + 1)) "$LOG" > "$slice" 2>/dev/null
         err=$(salient_error "$slice")
-        # A failure worth recovering from is a FAST one — the program never got
-        # going. A nonzero exit or logged error after a real session is just a
-        # normal quit and must not trigger restarts.
+        # A failure worth recovering from is one where the program never got
+        # going: it hung (124), or it exited fast with an error/nonzero code.
+        # A clean exit, or a nonzero after a real windowed session, is a normal
+        # quit and must not trigger restarts.
         failed=""
-        if [ $((SECONDS - started)) -lt 15 ] && { [ -n "$err" ] || [ "$code" -ne 0 ]; }; then
+        if [ "$code" = 124 ] || { [ $((SECONDS - started)) -lt 15 ] && { [ -n "$err" ] || [ "$code" -ne 0 ]; }; }; then
             failed=1
             crash_slice="$slice.crash"
             cp -f "$slice" "$crash_slice" 2>/dev/null   # stable copy for the next guard
+            [ "$code" = 124 ] && logmsg "FAILED: hung with no window"
             [ -n "$err" ] && logmsg "FAILED: $err"
         fi
 
@@ -872,6 +933,7 @@ Full log: $LOG" dialog-error
     if [ -n "$failed" ]; then
         write_failure_report "$exe" "$code" "${tried[*]}" "$crash_slice"
         local report; report=$(salient_error "$crash_slice")
+        [ -z "$report" ] && [ "$code" = 124 ] && report="Kept hanging with no window."
         notify "$exe couldn't be recovered" "${report:-Exited with code $code, no window.}
 Tried: ${tried[*]:-none}. Full details: $LOG" dialog-error
     fi
