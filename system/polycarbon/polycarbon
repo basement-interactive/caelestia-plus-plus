@@ -124,13 +124,63 @@ new_log() {
 salient_error() {
     # DXVK/VKD3D print "info:"/"warn:" chatter (incl. benign "could not open
     # registry key") and wine emits "NNNN:fixme:" — none of that is a failure
-    grep -aiE 'panicked at|thread .main.* panicked|called .Result::|Err value|not implemented|unhandled exception|err:(seh|module|winediag):|error while loading|shellexecuteex? failed|[a-z0-9_]+\.dll.*(missing|not found|failed to)|could not (load|find|open)|no such file|access is denied|application error|fatal error' "$LOG" 2>/dev/null \
+    grep -aiE 'panicked at|thread .main.* panicked|called .Result::|Err value|not implemented|unhandled exception|err:(seh|module|winediag):|error while loading|shellexecuteex? failed|[a-z0-9_]+\.dll.*(missing|not found|failed to)|could not (load|find|open)|no such file|access is denied|application error|fatal error|dll error|init error' "$LOG" 2>/dev/null \
         | grep -aivE '^(info|warn|debug):|^[0-9a-f]{2,}:(fixme|trace|warn)|WINEDEBUG=' \
         | tail -2 | sed 's/^[[:space:]]*//' | tr '\n' ' ' | cut -c1-240
 }
 
+# A Windows program's real crash reason is usually in ITS OWN log next to the
+# exe (Telegram's log.txt, an *.log, a crash dump), which our capture of
+# wine's stdout never sees. On a failure, fold those — only the ones this run
+# touched — into our log, so "cat last-run.log" shows the program's own error,
+# not just our vantage point. Also surfaces the GPUs in play, since graphics
+# crashes are common on multi-GPU machines.
+collect_app_logs() {
+    local dir=$1 marker=$2 f found=""
+    while IFS= read -r f; do
+        found=1
+        case "${f,,}" in
+        *.dmp)
+            logmsg "app crash dump present: ${f#"$dir"/}"
+            ;;
+        *)
+            logmsg "--- ${f#"$dir"/} (the program's own log) ---"
+            tail -50 "$f" >> "$LOG" 2>/dev/null
+            ;;
+        esac
+    done < <(find "$dir" -maxdepth 3 -type f \( -iname '*.log' -o -iname 'log*.txt' -o -iname '*.dmp' \) -newer "$marker" 2>/dev/null | head -4)
+    grep -aoE 'Found device: .*' "$LOG" 2>/dev/null | sort -u | while IFS= read -r d; do logmsg "GPU seen — $d"; done
+    [ -n "$found" ]
+}
+
 export WINEDEBUG="-all"
 export WINEFSYNC=1
+
+# Per-machine tuning hook. Anything exported in this file applies to every
+# program and can override the defaults above — the escape hatch for hardware
+# quirks a shared default can't guess. Examples (uncomment in the file):
+#   export DRI_PRIME=1          # force the discrete GPU on a multi-GPU box
+#   export WINEFSYNC=0          # if fsync misbehaves on this kernel
+#   export MESA_VK_DEVICE_SELECT=list   # print Vulkan devices to the log
+# Absent/empty by default, so it changes nothing until a fix is put there.
+POLY_ENV="$BASE/env"
+if [ ! -f "$POLY_ENV" ]; then
+    cat > "$POLY_ENV" <<'ENVTPL'
+# Polycarbon per-machine tuning. Uncomment a line to apply it to every
+# Windows program. Nothing here is set by default.
+
+# Multi-GPU machine (a discrete card + integrated graphics)? If apps crash at
+# startup or render on the wrong GPU, force the discrete one:
+#export DRI_PRIME=1
+
+# fsync misbehaving on this kernel (rare crashes at launch)?
+#export WINEFSYNC=0
+
+# Write the list of Vulkan devices into last-run.log for diagnosis:
+#export MESA_VK_DEVICE_SELECT=list
+ENVTPL
+fi
+[ -f "$POLY_ENV" ] && . "$POLY_ENV"
 
 fetch() { # url sha256 dest
     curl -fsSL --retry 3 -o "$3" "$1" || die "Download failed" "$1 — check your connection and try again"
@@ -629,16 +679,23 @@ Full log: $LOG" dialog-error
     local before="$BASE/.shortcuts.pre"
     _list_shortcuts > "$before"
 
+    # Marker so we can later tell which log/dump files THIS run produced
+    local marker="$BASE/.launch-marker"
+    : > "$marker"
+
     local started=$SECONDS
     run_target "$target" "$@"
     local code=$?
     logmsg "$(basename "$target") exited with code $code after $((SECONDS - started))s"
 
-    # Diagnose the exit. A recognisable error in the log (a crash, a missing
-    # DLL, an unimplemented API) is always surfaced with the actual reason —
-    # no matter how long the app ran — so a failure is never a silent black
-    # box. A quiet nonzero exit is only flagged if it happened fast (never got
-    # going); a nonzero exit after a real session is treated as a normal quit.
+    # Diagnose the exit. Fold in the program's own logs first so the reason it
+    # crashed (which it writes to its own file, not our stdout) is captured and
+    # searchable. A recognisable error is then always surfaced with the actual
+    # reason — no matter how long the app ran — so a failure is never a silent
+    # black box. A quiet nonzero exit is only flagged if it happened fast
+    # (never got going); a nonzero exit after a real session is a normal quit.
+    local had_app_logs=""
+    collect_app_logs "$(dirname "$target")" "$marker" && had_app_logs=1
     local err
     err=$(salient_error)
     if [ -n "$err" ]; then
@@ -646,7 +703,7 @@ Full log: $LOG" dialog-error
         notify "$(basename "$target") crashed" "$err
 Full log: $LOG" dialog-error
     elif [ "$code" -ne 0 ] && [ $((SECONDS - started)) -lt 10 ]; then
-        notify "$(basename "$target") did not start" "Exited with code $code and no window.
+        notify "$(basename "$target") did not start" "Exited with code $code and no window.${had_app_logs:+ Its own log was captured.}
 Full log: $LOG" dialog-error
     fi
 
