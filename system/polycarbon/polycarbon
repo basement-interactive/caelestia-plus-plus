@@ -151,26 +151,34 @@ install_runner() {
     needs_reboot="" # fresh install, nothing to migrate
 }
 
-# Daily latest-release check. Skipped while any app is running on the prefix
-# (swapping the runtime under a live process would corrupt it); the next idle
-# launch picks the update up instead.
+# Latest-release check. Time-throttled for normal launches ($1 = "force"
+# from --setup bypasses the throttle). Skipped while any app is running on
+# the prefix (swapping the runtime under a live process would corrupt it).
+# The throttle stamp is set ONLY on a definitive outcome — up-to-date or a
+# completed update — so a network failure or a deferral (app running) retries
+# on the very next launch instead of being suppressed for a day.
 check_runner_update() {
+    local force=${1:-}
     local stamp="$BASE/.update-check"
-    if [ -f "$stamp" ]; then
+    if [ "$force" != "force" ] && [ -f "$stamp" ]; then
         local age=$(( $(date +%s) - $(stat -c %Y "$stamp" 2>/dev/null || echo 0) ))
         [ "$age" -lt "$RUNNER_CHECK_SECONDS" ] && return 0
     fi
-    touch "$stamp"
     local tag
     tag=$(runner_latest_tag)
-    [ -n "$tag" ] || return 0
-    [ "$tag" = "$(cat "$BASE/runner.version" 2>/dev/null)" ] && return 0
+    [ -n "$tag" ] || return 0                     # offline — no stamp, retry next launch
+    echo "$tag" > "$BASE/.latest-tag"             # let the scan surface "update available"
+    if [ "$tag" = "$(cat "$BASE/runner.version" 2>/dev/null)" ]; then
+        touch "$stamp"                            # up to date — throttle the next check
+        return 0
+    fi
     if pgrep -f "$RUNNER_DIR/bin/wineserver" >/dev/null 2>&1; then
         say "runtime $tag available - applied on next launch (apps running now)"
-        return 0
+        return 0                                  # deferred — no stamp, retry next idle launch
     fi
     notify "Updating Windows apps" "New runtime $tag — a moment…" folder-download
     runner_install_tag "$tag"
+    touch "$stamp"
 }
 
 needs_reboot=""
@@ -343,11 +351,12 @@ install_components() {
 
 ensure_ready() {
     # Two rapid double-clicks must not race the setup; the second waits on
-    # the lock, finds everything ready and runs normally
+    # the lock, finds everything ready and runs normally. An explicit --setup
+    # forces the update check past its daily throttle (the user asked now).
     exec 9> "$BASE/.setup.lock"
     flock 9
     install_runner
-    check_runner_update
+    check_runner_update "${1:-}"
     init_prefix
     install_components
     link_filesystem   # cheap + idempotent; also upgrades pre-existing prefixes
@@ -533,11 +542,12 @@ EOF
 main() {
     [ $# -ge 1 ] || die "Nothing to run" "polycarbon expects a .exe, .msi or .lnk path"
 
-    # System-scan fix path: full setup now, run nothing
+    # System-scan fix path: full setup now, run nothing. Forces the runtime
+    # update check so "Set up / Update" in the scan always fetches the latest.
     if [ "$1" = "--setup" ]; then
         SETUP_MODE=1
         : > "$LOG"
-        ensure_ready
+        ensure_ready force
         harvest_schemes
         say "ready - double-click any .exe"
         exit 0

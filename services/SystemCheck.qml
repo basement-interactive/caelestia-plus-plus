@@ -365,9 +365,15 @@ Singleton {
         }
 
         // -- Polycarbon (Windows app runner)
-        const [wrVer, wrPrefix, wrComp, wrBind] = flags.polycarbon ?? [];
+        const [wrVer, wrPrefix, wrComp, wrBind, wrLatest] = flags.polycarbon ?? [];
         const polycarbonSetupFix = Object.assign({label: qsTr("Set up")}, _userFix(qsTr("Downloads the Polycarbon runtime (kept on the latest release automatically) plus the full compatibility stack (.NET, embedded HTML, and Direct3D 8-12 via DXVK/VKD3D-Proton on Vulkan machines) and the runtime libraries most programs expect (VC++ redistributables, core fonts, D3D shader compiler) — all checksum-verified, all unattended. Also points the Windows user folders at your real Linux ones. Everything lives under ~/.local/share/caelestia/polycarbon; nothing system-wide changes."), [`bash '${Quickshell.shellDir}/system/polycarbon/polycarbon' --setup`]));
-        if (wrVer && wrVer !== "none" && wrComp !== "none" && wrBind !== "none")
+        const polycarbonUpdateFix = Object.assign({label: qsTr("Update now")}, _userFix(qsTr("Updates the Polycarbon runtime to the latest release (%1) and migrates the environment in place. Fixes apps that need current Windows APIs — e.g. gamepad-using programs crash on older builds where the controller ID call is unimplemented. Close running Windows apps first so the swap can apply.").arg(wrLatest ?? ""), [`bash '${Quickshell.shellDir}/system/polycarbon/polycarbon' --setup`]));
+        const wrOutdated = wrVer && wrVer !== "none" && wrLatest && wrLatest !== "unknown" && wrLatest !== wrVer;
+        if (wrOutdated)
+            push("polycarbon", qsTr("Polycarbon runtime is outdated"), qsTr("On %1, latest is %2 — older runtimes miss Windows APIs newer apps need (gamepad apps crash with an \"unimplemented\" error). It updates itself, or do it now.").arg(wrVer).arg(wrLatest), "warn", {
+                fix: polycarbonUpdateFix
+            });
+        else if (wrVer && wrVer !== "none" && wrComp !== "none" && wrBind !== "none")
             push("polycarbon", qsTr("Polycarbon ready"), qsTr("Runtime %1 (auto-updating) — double-click any .exe and it runs (64/32-bit, .NET, HTML, Direct3D 8-12, VC++ runtimes); installers add themselves to your app menu").arg(wrVer), "ok");
         else if (wrVer && wrVer !== "none")
             push("polycarbon", qsTr("Polycarbon set up, extras still pending"), qsTr("The runner works; the next .exe launch finishes installing the runtime libraries and any missing components, or do it now"), "info", {
