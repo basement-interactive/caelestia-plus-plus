@@ -5,33 +5,36 @@
 # for .exe/.msi (see register.sh); everything needed to run the file is set
 # up on the spot, silently:
 #
-#   - the Soda runner (Bottles' Wine build, wow64: runs 64- and 32-bit apps)
-#     is downloaded once into ~/.local/share/caelestia/polycarbon
-#   - one shared wineprefix is initialised without any dialogs, with the
-#     Windows user folders (Documents, Downloads, Desktop…) pointed straight
-#     at the real Linux ones and the whole home tree reachable as H:\
-#   - the full compatibility stack goes in unattended: wine-mono (.NET),
-#     wine-gecko (embedded HTML), and on Vulkan-capable machines DXVK
-#     (Direct3D 8-11) and VKD3D-Proton (Direct3D 12); without Vulkan those
-#     two are skipped and Wine's GL renderer carries D3D instead
+#   - the runtime (Kron4ek's wine-staging build, wow64: runs 64- and 32-bit
+#     apps) is downloaded into ~/.local/share/caelestia/polycarbon and kept
+#     on the LATEST release automatically — a background-quiet daily check
+#     picks up new builds and migrates the environment in place
+#   - one shared prefix is initialised without any dialogs, with the Windows
+#     user folders (Documents, Downloads, Desktop…) pointed straight at the
+#     real Linux ones and the whole home tree reachable as H:\
+#   - the full compatibility stack goes in unattended: mono (.NET), gecko
+#     (embedded HTML), and on Vulkan-capable machines DXVK (Direct3D 8-11)
+#     and VKD3D-Proton (Direct3D 12); without Vulkan those two are skipped
+#     and the GL renderer carries D3D instead
 #   - a runtime-library layer (winetricks: the VC++ runtimes, core fonts,
 #     the D3D shader compiler and more) so far more real programs just run
 #   - after an installer finishes, the Start Menu / Desktop shortcuts it
 #     created are turned into real Linux launchers, so installed programs
 #     show up in the app menu exactly like they would on Windows
 #
-# Everything is user-level and checksum-pinned. Progress and failures surface
-# as desktop notifications, never as terminal output or dialogs.
+# The plumbing never surfaces: no update dialogs, no crash dialogs, no
+# runner-branded menu entries — user-facing text only ever says Polycarbon.
+# Everything is user-level; downloads are verified against the release's
+# published sha256sums. Progress and failures surface as desktop
+# notifications, never as terminal output or dialogs.
 set -u
 
-# Kron4ek's wine-staging (wow64: one build runs 64- and 32-bit apps). Chosen
-# over Bottles' Soda: Soda 9.0 is a stripped early-2024 gaming build missing
-# modern APIs (no SetThreadpoolTimerEx, Win8.1-era) that crashes real desktop
-# apps like Telegram before they can even create a GL context. Staging is
-# current, complete, and still fsync-enabled for games.
-RUNNER_VER="wine-11.13-staging"
-RUNNER_URL="https://github.com/Kron4ek/Wine-Builds/releases/download/11.13/wine-11.13-staging-amd64-wow64.tar.xz"
-RUNNER_SHA256="47d9e8098d5e5204c6d0d5054526389634d83bb78fbb3bab9f297f9cb226be09"
+# Always Kron4ek's builds, always the latest release. Staging is the bleeding
+# edge of upstream (current, complete, fsync-enabled); Soda 9.0 before it was
+# a stripped 2024 gaming build that crashed real desktop apps like Telegram.
+RUNNER_REPO="Kron4ek/Wine-Builds"
+RUNNER_FLAVOR="staging-amd64-wow64"
+RUNNER_CHECK_SECONDS=86400
 
 # Bump when anything in the component set below changes; installed prefixes
 # catch up on their next launch
@@ -106,33 +109,94 @@ vulkan_ok() {
     ls /usr/share/vulkan/icd.d/*.json >/dev/null 2>&1
 }
 
-install_runner() {
-    [ -x "$WINE" ] && [ "$(cat "$BASE/runner.version" 2>/dev/null)" = "$RUNNER_VER" ] && return 0
-    # A runner change (e.g. Soda -> staging) means the prefix was built on the
-    # old Wine; drop the version stamp so init_prefix re-runs wineboot to
-    # migrate it to the new build
-    [ -f "$BASE/runner.version" ] && [ "$(cat "$BASE/runner.version")" != "$RUNNER_VER" ] && needs_reboot=1
-    say "downloading $RUNNER_VER runner (~95 MB)..."
-    notify "Setting up Windows apps" "One-time download of the $RUNNER_VER runner (~95 MB)…" folder-download
-    fetch "$RUNNER_URL" "$RUNNER_SHA256" "$BASE/runner.tar.xz"
-    rm -rf "$RUNNER_DIR.new" "$RUNNER_DIR"
+# Latest release tag from the pinned repo, empty on network failure
+runner_latest_tag() {
+    curl -fsSL --max-time 8 "https://api.github.com/repos/$RUNNER_REPO/releases/latest" 2>/dev/null | grep -m1 '"tag_name"' | cut -d'"' -f4
+}
+
+# Download and swap in the given release. Integrity comes from the release's
+# own published sha256sums.txt rather than a hash baked in here — that is
+# what makes always-latest possible while still refusing a corrupt download.
+runner_install_tag() {
+    local tag=$1
+    local asset="wine-$tag-$RUNNER_FLAVOR.tar.xz"
+    local base_url="https://github.com/$RUNNER_REPO/releases/download/$tag"
+    say "downloading runtime $tag (~95 MB)..."
+    curl -fsSL --retry 3 -o "$BASE/runner.tar.xz" "$base_url/$asset" || die "Runtime download failed" "Check your connection and try again"
+    local want
+    want=$(curl -fsSL --max-time 15 "$base_url/sha256sums.txt" 2>/dev/null | awk -v a="$asset" '$2 == a || $2 == "./"a {print $1}')
+    if [ -n "$want" ]; then
+        echo "$want  $BASE/runner.tar.xz" | sha256sum -c --quiet - || {
+            rm -f "$BASE/runner.tar.xz"
+            die "Runtime download corrupted" "Checksum mismatch — try again"
+        }
+    fi
+    rm -rf "$RUNNER_DIR.new"
     mkdir -p "$RUNNER_DIR.new"
-    tar -xJf "$BASE/runner.tar.xz" --strip-components=1 -C "$RUNNER_DIR.new" || die "Windows runner unpack failed" "See $LOG"
+    tar -xJf "$BASE/runner.tar.xz" --strip-components=1 -C "$RUNNER_DIR.new" || die "Runtime unpack failed" "See $LOG"
+    rm -rf "$RUNNER_DIR"
     mv "$RUNNER_DIR.new" "$RUNNER_DIR"
-    echo "$RUNNER_VER" > "$BASE/runner.version"
+    echo "$tag" > "$BASE/runner.version"
     rm -f "$BASE/runner.tar.xz"
+    needs_reboot=1
+}
+
+install_runner() {
+    [ -x "$WINE" ] && return 0
+    notify "Setting up Windows apps" "One-time download of the runtime (~95 MB)…" folder-download
+    local tag
+    tag=$(runner_latest_tag)
+    [ -n "$tag" ] || die "Cannot reach the update server" "The first-time setup needs internet — try again once online"
+    runner_install_tag "$tag"
+    needs_reboot="" # fresh install, nothing to migrate
+}
+
+# Daily latest-release check. Skipped while any app is running on the prefix
+# (swapping the runtime under a live process would corrupt it); the next idle
+# launch picks the update up instead.
+check_runner_update() {
+    local stamp="$BASE/.update-check"
+    if [ -f "$stamp" ]; then
+        local age=$(( $(date +%s) - $(stat -c %Y "$stamp" 2>/dev/null || echo 0) ))
+        [ "$age" -lt "$RUNNER_CHECK_SECONDS" ] && return 0
+    fi
+    touch "$stamp"
+    local tag
+    tag=$(runner_latest_tag)
+    [ -n "$tag" ] || return 0
+    [ "$tag" = "$(cat "$BASE/runner.version" 2>/dev/null)" ] && return 0
+    if pgrep -f "$RUNNER_DIR/bin/wineserver" >/dev/null 2>&1; then
+        say "runtime $tag available - applied on next launch (apps running now)"
+        return 0
+    fi
+    notify "Updating Windows apps" "New runtime $tag — a moment…" folder-download
+    runner_install_tag "$tag"
 }
 
 needs_reboot=""
 
+# wineboot runs with no display attached so its "updating configuration"
+# splash physically cannot appear — the registry/DLL work is all headless
+_silent_wineboot() { # -i | -u
+    env -u DISPLAY -u WAYLAND_DISPLAY WINEDLLOVERRIDES="mscoree=;mshtml=" "$RUNNER_DIR/bin/wineboot" "$1" >>"$LOG" 2>&1
+}
+
+# The plumbing must never announce itself: no crash-handler dialog (failures
+# already surface as a Polycarbon notification), and prefix updates are done
+# proactively here so an app launch can never trigger the update splash.
+_quiet_runtime_ui() {
+    "$WINE" reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f >>"$LOG" 2>&1
+}
+
 init_prefix() {
     if [ -f "$WINEPREFIX/system.reg" ]; then
-        # Existing prefix, but the runner just changed under it — migrate the
-        # prefix to the new Wine (updates system DLLs) without wiping user data
+        # Existing prefix, but the runtime just changed under it — migrate the
+        # prefix in place (updates system DLLs) without wiping user data
         if [ -n "$needs_reboot" ]; then
-            say "migrating the Windows environment to the new runner..."
-            env WINEDLLOVERRIDES="mscoree=;mshtml=" "$RUNNER_DIR/bin/wineboot" -u >>"$LOG" 2>&1 || true
+            say "migrating the Windows environment to the new runtime..."
+            _silent_wineboot -u || true
             "$RUNNER_DIR/bin/wineserver" -w
+            _quiet_runtime_ui
         fi
         return 0
     fi
@@ -141,8 +205,9 @@ init_prefix() {
     # mono/gecko are suppressed only for this bootstrap (their download
     # dialogs are the popups this runner exists to avoid); the real things
     # are installed unattended right after by install_components
-    env WINEDLLOVERRIDES="mscoree=;mshtml=" "$RUNNER_DIR/bin/wineboot" -i >>"$LOG" 2>&1 || die "Windows environment setup failed" "See $LOG"
+    _silent_wineboot -i || die "Windows environment setup failed" "See $LOG"
     "$RUNNER_DIR/bin/wineserver" -w
+    _quiet_runtime_ui
     link_filesystem
 }
 
@@ -239,15 +304,15 @@ install_components() {
     rm -rf "$tmp"
     mkdir -p "$tmp"
 
-    say "installing wine-mono $MONO_VER (.NET apps)..."
+    say "installing .NET support..."
     fetch "$MONO_URL" "$MONO_SHA256" "$tmp/mono.msi"
-    "$WINE" msiexec /i "$tmp/mono.msi" /qn >>"$LOG" 2>&1 || die "wine-mono install failed" "See $LOG"
+    "$WINE" msiexec /i "$tmp/mono.msi" /qn >>"$LOG" 2>&1 || die ".NET support install failed" "See $LOG"
 
-    say "installing wine-gecko $GECKO_VER (embedded HTML)..."
+    say "installing embedded HTML support..."
     fetch "$GECKO_URL-x86_64.msi" "$GECKO64_SHA256" "$tmp/gecko64.msi"
     fetch "$GECKO_URL-x86.msi" "$GECKO32_SHA256" "$tmp/gecko32.msi"
-    "$WINE" msiexec /i "$tmp/gecko64.msi" /qn >>"$LOG" 2>&1 || die "wine-gecko install failed" "See $LOG"
-    "$WINE" msiexec /i "$tmp/gecko32.msi" /qn >>"$LOG" 2>&1 || die "wine-gecko (32-bit) install failed" "See $LOG"
+    "$WINE" msiexec /i "$tmp/gecko64.msi" /qn >>"$LOG" 2>&1 || die "HTML support install failed" "See $LOG"
+    "$WINE" msiexec /i "$tmp/gecko32.msi" /qn >>"$LOG" 2>&1 || die "HTML support (32-bit) install failed" "See $LOG"
 
     if vulkan_ok; then
         say "installing DXVK $DXVK_VER (Direct3D 8-11 over Vulkan)..."
@@ -282,6 +347,7 @@ ensure_ready() {
     exec 9> "$BASE/.setup.lock"
     flock 9
     install_runner
+    check_runner_update
     init_prefix
     install_components
     link_filesystem   # cheap + idempotent; also upgrades pre-existing prefixes
@@ -351,11 +417,16 @@ Comment=Windows program via Polycarbon
 Exec="$SELF" "$lnk"
 Icon=${icon:-application-x-executable}
 Terminal=false
-Categories=Utility;X-Wine;
+Categories=Utility;
 X-Polycarbon=true
 EOF
         notify "$name installed" "Added to your app menu" checkmark
     done < <(_list_shortcuts)
+    # The runtime's own menu builder writes runner-branded duplicates under
+    # applications/wine/. Its extracted ICONS live separately in the icon
+    # theme and stay usable; the branded entries themselves are removed so
+    # only Polycarbon's launchers ever appear in the app menu.
+    rm -rf "$APPS_DIR/wine"
     command -v update-desktop-database >/dev/null && update-desktop-database "$APPS_DIR" 2>/dev/null || true
 }
 
