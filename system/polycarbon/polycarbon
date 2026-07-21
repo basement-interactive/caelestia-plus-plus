@@ -548,6 +548,22 @@ ensure_ready() {
     flock -u 9
 }
 
+# Kill any lingering instances of THIS program before launching. Stale copies
+# from an earlier crashed/hung/force-killed run pile up and poison the next
+# launch: a single-instance app (Telegram) then aborts on the contended lock/
+# socket (exit 9) instead of starting. Wine names each process after its exe
+# (comm, truncated to 15 chars), so an exact-comm kill hits only this program's
+# own processes — never polycarbon itself or other apps in the prefix.
+kill_stale() { # exe-basename
+    local comm; comm=$(printf '%s' "$1" | cut -c1-15)
+    if pgrep -x "$comm" >/dev/null 2>&1; then
+        logmsg "clearing stale instances of $1"
+        pkill -x "$comm" 2>/dev/null
+        sleep 1
+        pkill -9 -x "$comm" 2>/dev/null
+    fi
+}
+
 # A GUI program that neither opens a window nor exits is HUNG (a graphics
 # deadlock on a multi-GPU box does exactly this) — recovery can only help if
 # we stop waiting on it. run_with_watchdog launches the program and watches
@@ -857,6 +873,8 @@ Full log: $LOG" dialog-error
     local -a appargs=("$@")
     local qf="$QUIRKS_DIR/$exe.env"
     mkdir -p "$QUIRKS_DIR"
+    # Clean slate: no leftover instances of this program contaminating the run
+    kill_stale "$exe"
     # Prevention: a fix learned on a past run is applied from the very first
     # launch, so a program that once crashed just starts.
     local learned=""
@@ -886,6 +904,10 @@ Full log: $LOG" dialog-error
         fi
 
         : > "$marker"
+        # Each recovery attempt starts from a clean slate: the previous
+        # attempt's process is cleared so a single-instance app doesn't abort
+        # on a still-contended lock when it relaunches.
+        [ -n "$step" ] && kill_stale "$exe"
         rung_start=$(wc -l <"$LOG" 2>/dev/null || echo 0)
         started=$SECONDS
         # Installers run windowless and exit on their own — block on them.
