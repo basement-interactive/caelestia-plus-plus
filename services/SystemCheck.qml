@@ -95,10 +95,27 @@ Singleton {
             return;
         scanning = true;
         ShellUpdates.check();
-        // All probing lives in one shell script (assets/systemcheck-probe.sh)
-        // that prints machine-readable "key|field|field" lines
+        _probesLeft = 2;
+        // All general probing lives in one shell script (assets/systemcheck-
+        // probe.sh) printing machine-readable "key|field|field" lines;
+        // shell.json gets its own doctor, fed the runtime config schema so
+        // its findings match what this build of the shell actually accepts
         probe.command = ["bash", Quickshell.shellPath("assets/systemcheck-probe.sh"), Quickshell.shellDir, Paths.wallsdir, binaries.map(b => b.bin).join(" ")];
         probe.running = true;
+        _doctorSchema = ConfigDoctor.schemaJson();
+        doctorProbe.environment = {CAELESTIA_SCHEMA: _doctorSchema};
+        doctorProbe.command = ["python3", Quickshell.shellPath("assets/config-doctor.py"), ConfigDoctor.configPath];
+        doctorProbe.running = true;
+    }
+
+    property int _probesLeft: 0
+    property string _probeOut: ""
+    property string _doctorOut: ""
+    property string _doctorSchema: ""
+
+    function _probeDone(): void {
+        if (--_probesLeft === 0)
+            _finish(_probeOut);
     }
 
     // --- Fix staging: nothing executes without an explicit confirm ----------
@@ -304,10 +321,40 @@ Singleton {
         else
             push("hallucinate", qsTr("hallucinate installed"), qsTr("AI-hallucinated one-shot apps via `hallucinate \"…\"`"), "ok");
 
-        for (const c of cfgs)
+        // shell.json has a dedicated doctor (assets/config-doctor.py): it
+        // diagnoses against the runtime schema and its fix repairs the file
+        // surgically — typos renamed, wrong types coerced or defaulted,
+        // broken bar entries mended — with the original kept next to it
+        const doctorLines = _doctorOut.trim().split("\n").filter(l => l);
+        const doctorIssues = doctorLines.filter(l => l.startsWith("issue|")).map(l => {
+            const p = l.split("|");
+            return {sev: p[1], problem: p[2], action: p[3]};
+        });
+        const doctorRan = doctorLines.length > 0;
+        if (doctorRan) {
+            const complaints = ConfigDoctor.loadComplaints;
+            if (doctorIssues.length) {
+                push("shell-config", qsTr("%n problem(s) in shell.json", "", doctorIssues.length), doctorIssues.map(i => i.problem).slice(0, 4).join("  ·  ") + (doctorIssues.length > 4 ? "  ·  …" : ""), doctorIssues.some(i => i.sev === "fail") ? "fail" : "warn", {
+                    fix: {
+                        label: qsTr("Repair"),
+                        summary: qsTr("Applies exactly the repairs listed below, nothing else. The original file is copied aside first (.doctor-bak), every unrecognised setting close to a real one is treated as a typo and renamed rather than lost, and the shell picks the fixed config up immediately."),
+                        commands: doctorIssues.map(i => i.action),
+                        exec: ["python3", Quickshell.shellPath("assets/config-doctor.py"), ConfigDoctor.configPath, "--repair"],
+                        env: _doctorSchema
+                    }
+                });
+            } else {
+                push("shell-config", qsTr("shell.json valid"), complaints.length ? qsTr("Valid now, but the shell complained at load: %1").arg(complaints.join("; ")) : qsTr("Structure and types match what this shell accepts"), complaints.length ? "info" : "ok");
+            }
+        }
+
+        for (const c of cfgs) {
+            if (doctorRan && c.file === ConfigDoctor.configPath)
+                continue;
             push(`cfg-${c.file}`, c.ok ? qsTr("Config valid: %1").arg(c.file.split("/").pop()) : qsTr("Config is not valid JSON: %1").arg(c.file.split("/").pop()), c.ok ? c.file : qsTr("%1 — the shell falls back to defaults while this file is broken").arg(c.file), c.ok ? "ok" : "fail", c.ok ? null : {
                 fix: Object.assign({label: qsTr("Reset")}, _userFix(qsTr("Moves the broken file aside (a .broken.bak copy stays next to it, nothing is deleted); the shell then regenerates defaults."), [`mv '${c.file}' '${c.file}.broken.bak'`]))
             });
+        }
 
         const dirty = parseInt(flags.gitdirty?.[0] ?? "0", 10);
         push("git-dirty", dirty > 0 ? qsTr("Shell checkout has %1 modified files").arg(dirty) : qsTr("Shell checkout clean"), dirty > 0 ? qsTr("Local edits are fine, but they can conflict with updates — no automatic action") : qsTr("No local modifications"), dirty > 0 ? "info" : "ok");
@@ -411,11 +458,6 @@ Singleton {
             push("wallpaper-dir", qsTr("Wallpaper directory missing"), qsTr("%1 does not exist — the wallpaper picker has nothing to show").arg(flags.walldir?.[1] ?? ""), "info", {
                 fix: Object.assign({label: qsTr("Create")}, _userFix(qsTr("Creates the empty wallpaper directory the config points at. Nothing else changes."), [`mkdir -p '${flags.walldir?.[1] ?? ""}'`]))
             });
-
-        const knownBarIds = ["logo", "workspaces", "spacer", "activeWindow", "firewall", "features", "tray", "clock", "statusIcons", "power"];
-        const unknownBarIds = (flags.barids?.[0] ?? "").split(" ").filter(i => i && !knownBarIds.includes(i));
-        if (unknownBarIds.length)
-            push("bar-ids", qsTr("Unknown bar entries in shell.json"), qsTr("\"%1\" is not a valid bar entry id (typo?) — the bar silently drops it. Valid ids: %2").arg(unknownBarIds.join("\", \"")).arg(knownBarIds.join(", ")), "warn");
 
         // -- Hyprland extras
         const portalUp = flags.portalsvc?.[0] === "active";
@@ -531,7 +573,26 @@ Singleton {
         id: probe
 
         stdout: StdioCollector {
-            onStreamFinished: root._finish(text)
+            onStreamFinished: {
+                root._probeOut = text;
+                root._probeDone();
+            }
+        }
+    }
+
+    Process {
+        id: doctorProbe
+
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root._doctorOut = text;
+                root._probeDone();
+            }
+        }
+        // A doctor crash leaves stdout empty and the row falls back to the
+        // plain JSON-validity check; the traceback should still be findable
+        stderr: SplitParser {
+            onRead: data => console.warn("systemcheck configdoctor:", data)
         }
     }
 
