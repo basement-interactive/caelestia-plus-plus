@@ -127,10 +127,16 @@ new_log() {
 # kept (not just the matched word) so the message reads like the real error;
 # the last couple are joined for context. Empty when nothing notable was
 # logged, i.e. a clean exit.
+# $1: which log slice to read (default the whole run log). The recovery loop
+# passes a per-attempt slice so an earlier crash's error never taints the
+# verdict on a later, working attempt.
 salient_error() {
     # DXVK/VKD3D print "info:"/"warn:" chatter (incl. benign "could not open
-    # registry key") and wine emits "NNNN:fixme:" — none of that is a failure
-    grep -aiE 'panicked at|thread .main.* panicked|called .Result::|Err value|not implemented|unhandled exception|err:(seh|module|winediag):|error while loading|shellexecuteex? failed|[a-z0-9_]+\.dll.*(missing|not found|failed to)|could not (load|find|open)|no such file|access is denied|application error|fatal error|dll error|init error' "$LOG" 2>/dev/null \
+    # registry key") and wine emits "NNNN:fixme:" — none of that is a failure.
+    # Telegram's SetThreadpool* "DLL Error" lines are its own non-fatal probes.
+    # 'dll error'/'init error' are deliberately NOT matched: apps (Telegram)
+    # log those non-fatally on every start, so they'd flag a working program.
+    grep -aiE 'panicked at|thread .main.* panicked|called .Result::|Err value|not implemented|unhandled exception|err:(seh|module|winediag):|error while loading|shellexecuteex? failed|[a-z0-9_]+\.dll.*(missing|not found|failed to)|could not load|no such file|access is denied|application error|fatal error' "${1:-$LOG}" 2>/dev/null \
         | grep -aivE '^(info|warn|debug):|^[0-9a-f]{2,}:(fixme|trace|warn)|WINEDEBUG=' \
         | tail -2 | sed 's/^[[:space:]]*//' | tr '\n' ' ' | cut -c1-240
 }
@@ -218,23 +224,26 @@ vulkan_ok() {
 # and the env it exports. Ordered most-likely / least-invasive first.
 QUIRKS_DIR="$BASE/quirks"
 
-gpu_count() { grep -acE '^info:  Found device: ' "$LOG"; }
+# All the detectors read a log slice ($2/$1 = the current attempt's slice,
+# default whole log) so recovery judges each attempt on its own output.
+gpu_count() { grep -acE '^info:  Found device: ' "${1:-$LOG}"; }
 
-# Does the log look like it died in graphics/GPU init?
+# Does the slice look like it died in graphics/GPU init?
 graphics_crash() {
-    grep -aqiE 'Found device:|DXVK|vkd3d|vulkan|d3d1[012]|dxgi|Process set as DPI|Renderer' "$LOG"
+    grep -aqiE 'Found device:|DXVK|vkd3d|vulkan|d3d1[012]|dxgi|Process set as DPI|Renderer' "${1:-$LOG}"
 }
 
 wgi_crash() {
-    grep -aqE 'windows_wgi.*panicked|NonRoamableId|HRESULT\(0x80004001\)' "$LOG"
+    grep -aqE 'windows_wgi.*panicked|NonRoamableId|HRESULT\(0x80004001\)' "${1:-$LOG}"
 }
 
-# id  ->  guard exit status (0 = try this step for the current failure)
+# id, log-slice  ->  guard exit status (0 = try this step for the current crash)
 recovery_guard() {
+    local slice=${2:-$LOG}
     case $1 in
-    gpu_prime) [ "$(gpu_count)" -ge 2 ] ;;             # 2+ GPUs: force the discrete one
-    dxvk_off)  graphics_crash ;;                        # graphics death: D3D over GL, not Vulkan
-    wgi_off)   wgi_crash ;;                             # gamepad-API panic
+    gpu_prime) [ "$(gpu_count "$slice")" -ge 2 ] ;;    # 2+ GPUs: force the discrete one
+    dxvk_off)  graphics_crash "$slice" ;;              # graphics death: D3D over GL, not Vulkan
+    wgi_off)   wgi_crash "$slice" ;;                   # gamepad-API panic
     fsync_off) true ;;                                  # kernel sync issues: last simple lever
     combined)  true ;;                                  # everything applicable at once
     esac
@@ -252,16 +261,18 @@ recovery_human() {
 
 # id  ->  the env line(s) that apply the tweak. combined = union of the
 # applicable single steps.
+# id, log-slice -> env line(s). combined = union of the applicable singles.
 recovery_env() {
+    local slice=${2:-$LOG}
     case $1 in
     gpu_prime) echo 'export DRI_PRIME=1' ;;
     dxvk_off)  echo 'export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}d3d9,d3d10core,d3d11,d3d12,d3d12core,dxgi=b"' ;;
     wgi_off)   echo 'export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}windows.gaming.input="' ;;
     fsync_off) echo 'export WINEFSYNC=0 WINEESYNC=0' ;;
     combined)
-        recovery_guard gpu_prime && recovery_env gpu_prime
-        recovery_guard dxvk_off && recovery_env dxvk_off
-        recovery_guard wgi_off && recovery_env wgi_off
+        recovery_guard gpu_prime "$slice" && recovery_env gpu_prime
+        recovery_guard dxvk_off "$slice" && recovery_env dxvk_off
+        recovery_guard wgi_off "$slice" && recovery_env wgi_off
         recovery_env fsync_off
         ;;
     esac
@@ -789,11 +800,15 @@ Full log: $LOG" dialog-error
     local -a ladder=("" gpu_prime dxvk_off wgi_off fsync_off combined)
     local code started err failed step extra had_app_logs=""
     local -a tried=()
+    # Guards read the signature of the LAST crash; each attempt is judged on
+    # its OWN output slice, so an earlier crash's error never taints a later
+    # working attempt.
+    local slice="$BASE/.attempt.log" crash_slice="$LOG" rung_start
 
     for step in "${ladder[@]}"; do
         if [ -n "$step" ]; then
-            recovery_guard "$step" || continue
-            extra=$(recovery_env "$step")
+            recovery_guard "$step" "$crash_slice" || continue
+            extra=$(recovery_env "$step" "$crash_slice")
             [ -n "$extra" ] || continue
             tried+=("$step")
             logmsg "recovery: restarting $exe with fix '$step' ($(recovery_human "$step"))"
@@ -803,6 +818,7 @@ Full log: $LOG" dialog-error
         fi
 
         : > "$marker"
+        rung_start=$(wc -l <"$LOG" 2>/dev/null || echo 0)
         started=$SECONDS
         # Learned fixes + this rung's tweak apply to THIS launch only
         ( eval "$learned"; eval "$extra"; run_target "$target" "$@" )
@@ -815,13 +831,17 @@ Full log: $LOG" dialog-error
 
         had_app_logs=""
         collect_app_logs "$(dirname "$target")" "$marker" && had_app_logs=1
-        err=$(salient_error)
+        # This attempt's output only — everything the log grew by since launch
+        tail -n +$((rung_start + 1)) "$LOG" > "$slice" 2>/dev/null
+        err=$(salient_error "$slice")
         # A failure worth recovering from is a FAST one — the program never got
         # going. A nonzero exit or logged error after a real session is just a
         # normal quit and must not trigger restarts.
         failed=""
         if [ $((SECONDS - started)) -lt 15 ] && { [ -n "$err" ] || [ "$code" -ne 0 ]; }; then
             failed=1
+            crash_slice="$slice.crash"
+            cp -f "$slice" "$crash_slice" 2>/dev/null   # stable copy for the next guard
             [ -n "$err" ] && logmsg "FAILED: $err"
         fi
 
@@ -838,8 +858,8 @@ Full log: $LOG" dialog-error
 
     # Exhausted the ladder — surface everything useful in one place.
     if [ -n "$failed" ]; then
-        write_failure_report "$exe" "$code" "${tried[*]}"
-        local report; report=$(salient_error)
+        write_failure_report "$exe" "$code" "${tried[*]}" "$crash_slice"
+        local report; report=$(salient_error "$crash_slice")
         notify "$exe couldn't be recovered" "${report:-Exited with code $code, no window.}
 Tried: ${tried[*]:-none}. Full details: $LOG" dialog-error
     fi
@@ -854,14 +874,14 @@ Tried: ${tried[*]:-none}. Full details: $LOG" dialog-error
 # When recovery gives up, dump a verbose, self-contained diagnostic block into
 # the log: the exact fixes attempted, the GPUs seen, the runtime/version, and
 # every crash dump found — so one look at last-run.log tells the whole story.
-write_failure_report() { # exe code tried
+write_failure_report() { # exe code tried crash-slice
     {
         echo "========================================================"
         echo "polycarbon failure report — $1"
         echo "runtime: $(cat "$BASE/runner.version" 2>/dev/null)   exit code: $2"
         echo "recovery fixes attempted: ${3:-none}"
         grep -aoE '^info:  Found device: .*' "$LOG" | sed 's/^info:  /GPU: /' | sort -u
-        echo "diagnostic line: $(salient_error)"
+        echo "diagnostic line: $(salient_error "${4:-$LOG}")"
         echo "if this is a game/GPU app, editing $POLY_ENV by hand can help — see the notes in it"
         echo "========================================================"
     } >> "$LOG"
