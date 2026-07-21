@@ -79,19 +79,54 @@ RUNNER_DIR="$BASE/runner"
 WINE="$RUNNER_DIR/bin/wine"
 export WINEPREFIX="$BASE/prefix"
 LOG="$BASE/last-run.log"
+PREV_LOG="$BASE/previous-run.log"
 
 notify() { # title body [icon]
     command -v notify-send >/dev/null && notify-send -a "Polycarbon" -i "${3:-application-x-executable}" "$1" "$2"
 }
 
+# Every step polycarbon takes is timestamped into the log, so even a hard
+# crash leaves a trail of exactly how far it got. The log is on disk and
+# append-flushed, so it survives the program (or wine) dying.
+logmsg() {
+    printf '[%s] polycarbon: %s\n' "$(date '+%H:%M:%S')" "$1" >> "$LOG"
+    say "$1"
+}
+
+# A fatal setup error is logged, surfaced as a notification WITH the reason,
+# and left in the log for later
 die() {
-    notify "$1" "$2" dialog-error
+    logmsg "FATAL: $1 — $2"
+    notify "$1" "$2
+Log: $LOG" dialog-error
     exit 1
 }
 
 say() { # --setup runs stream stdout into the scan's fix card
     [ "${SETUP_MODE:-}" = 1 ] && echo "$1"
     return 0
+}
+
+# Start a fresh log for this run, keeping the previous one so a crash's log
+# isn't lost the moment the user retries
+new_log() {
+    [ -f "$LOG" ] && mv -f "$LOG" "$PREV_LOG" 2>/dev/null
+    : > "$LOG"
+    logmsg "polycarbon $(cat "$BASE/runner.version" 2>/dev/null || echo 'not installed'), pid $$"
+}
+
+# Pull the most diagnostic lines out of a run's log — a Rust panic (with its
+# file:line and reason), a WinRT/COM "not implemented", an unhandled
+# exception, a wine loader/seh error, a missing DLL or file. Whole lines are
+# kept (not just the matched word) so the message reads like the real error;
+# the last couple are joined for context. Empty when nothing notable was
+# logged, i.e. a clean exit.
+salient_error() {
+    # DXVK/VKD3D print "info:"/"warn:" chatter (incl. benign "could not open
+    # registry key") and wine emits "NNNN:fixme:" — none of that is a failure
+    grep -aiE 'panicked at|thread .main.* panicked|called .Result::|Err value|not implemented|unhandled exception|err:(seh|module|winediag):|error while loading|shellexecuteex? failed|[a-z0-9_]+\.dll.*(missing|not found|failed to)|could not (load|find|open)|no such file|access is denied|application error|fatal error' "$LOG" 2>/dev/null \
+        | grep -aivE '^(info|warn|debug):|^[0-9a-f]{2,}:(fixme|trace|warn)|WINEDEBUG=' \
+        | tail -2 | sed 's/^[[:space:]]*//' | tr '\n' ' ' | cut -c1-240
 }
 
 export WINEDEBUG="-all"
@@ -546,7 +581,7 @@ main() {
     # update check so "Set up / Update" in the scan always fetches the latest.
     if [ "$1" = "--setup" ]; then
         SETUP_MODE=1
-        : > "$LOG"
+        new_log
         ensure_ready force
         harvest_schemes
         say "ready - double-click any .exe"
@@ -562,16 +597,23 @@ main() {
         shift
         [ $# -ge 1 ] || die "Nothing to open" "no link given"
         [ -x "$WINE" ] || die "Windows apps not set up yet" "Run the program once before its links work"
+        new_log
+        logmsg "opening link: $1"
         dispatch_url "$1"
-        exit $?
+        local ucode=$?
+        local uerr; uerr=$(salient_error)
+        [ -n "$uerr" ] && notify "Link failed" "$uerr
+Full log: $LOG" dialog-error
+        exit "$ucode"
     fi
 
     local target
     target=$(realpath "$1")
     shift
-    [ -e "$target" ] || die "File not found" "$target"
 
-    : > "$LOG"
+    new_log
+    [ -e "$target" ] || die "File not found" "$target"
+    logmsg "launching $(basename "$target")"
     ensure_ready
 
     # Bridge protocols the program registered on a previous run/install BEFORE
@@ -587,14 +629,25 @@ main() {
     local before="$BASE/.shortcuts.pre"
     _list_shortcuts > "$before"
 
-    # No launch notification — a working app appearing IS the feedback, like
-    # on Windows. Only a fast nonzero exit (never got a window up) notifies;
-    # apps returning nonzero after a real session are business as usual.
     local started=$SECONDS
     run_target "$target" "$@"
     local code=$?
-    if [ "$code" -ne 0 ] && [ $((SECONDS - started)) -lt 10 ]; then
-        notify "$(basename "$target") did not start" "Exit code $code — log: $LOG" dialog-error
+    logmsg "$(basename "$target") exited with code $code after $((SECONDS - started))s"
+
+    # Diagnose the exit. A recognisable error in the log (a crash, a missing
+    # DLL, an unimplemented API) is always surfaced with the actual reason —
+    # no matter how long the app ran — so a failure is never a silent black
+    # box. A quiet nonzero exit is only flagged if it happened fast (never got
+    # going); a nonzero exit after a real session is treated as a normal quit.
+    local err
+    err=$(salient_error)
+    if [ -n "$err" ]; then
+        logmsg "FAILED: $err"
+        notify "$(basename "$target") crashed" "$err
+Full log: $LOG" dialog-error
+    elif [ "$code" -ne 0 ] && [ $((SECONDS - started)) -lt 10 ]; then
+        notify "$(basename "$target") did not start" "Exited with code $code and no window.
+Full log: $LOG" dialog-error
     fi
 
     # An installer usually returns promptly and leaves shortcuts behind; wait
