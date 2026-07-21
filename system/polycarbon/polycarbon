@@ -388,6 +388,39 @@ winpath() {
     "$WINE" winepath -w "$1" 2>/dev/null
 }
 
+# Route a browser URI to the program that registered its scheme. Wine's
+# `start`/ShellExecute fails outright on custom schemes ("General failure"),
+# so resolve the handler command from the registry and launch it directly.
+# The registered command (e.g. "…\Vortex.exe" "%1") is tokenised the Windows
+# way and %1 replaced with the whole URI as ONE argv element — query strings
+# (?a=1&b=2) then reach the program intact instead of the shell splitting on &.
+dispatch_url() {
+    local uri=$1 scheme=${1%%://*} cmd root
+    for root in 'HKEY_CURRENT_USER\Software\Classes' 'HKEY_LOCAL_MACHINE\Software\Classes' 'HKEY_CLASSES_ROOT'; do
+        cmd=$("$WINE" reg query "$root\\$scheme\\shell\\open\\command" /ve 2>/dev/null | sed -n 's/.*REG_SZ[[:space:]]*//p' | tr -d '\r')
+        [ -n "$cmd" ] && break
+    done
+    if [ -z "$cmd" ]; then
+        notify "Link not handled" "No Windows program is registered for $scheme:// links"
+        return 1
+    fi
+    local -a argv
+    mapfile -d '' -t argv < <(python3 -c '
+import sys
+cmd, uri = sys.argv[1], sys.argv[2]
+toks, cur, inq = [], "", False
+for ch in cmd:
+    if ch == "\"": inq = not inq
+    elif ch == " " and not inq:
+        if cur: toks.append(cur); cur = ""
+    else: cur += ch
+if cur: toks.append(cur)
+# a bare %1 token becomes the whole URI; embedded %1 (rare) is substituted
+sys.stdout.write("\0".join((uri if t == "%1" else t.replace("%1", uri)) for t in toks))
+' "$cmd" "$uri")
+    "$WINE" "${argv[@]}" >>"$LOG" 2>&1
+}
+
 # The directories an installer drops shortcuts into
 _shortcut_roots() {
     local profile
@@ -511,13 +544,15 @@ main() {
     fi
 
     # Browser protocol launch (vortex://…): hand the URI to the handler the
-    # Windows program registered inside the prefix
+    # Windows program registered inside the prefix. The runtime is necessarily
+    # already installed (you can't register a scheme without first running the
+    # program), so skip setup entirely — going through ensure_ready here would
+    # block on the running app's setup lock and delay the handoff.
     if [ "$1" = "--url" ]; then
         shift
         [ $# -ge 1 ] || die "Nothing to open" "no link given"
-        : > "$LOG"
-        ensure_ready
-        "$WINE" start "$1" >>"$LOG" 2>&1
+        [ -x "$WINE" ] || die "Windows apps not set up yet" "Run the program once before its links work"
+        dispatch_url "$1"
         exit $?
     fi
 
@@ -528,6 +563,15 @@ main() {
 
     : > "$LOG"
     ensure_ready
+
+    # Bridge protocols the program registered on a previous run/install BEFORE
+    # launching it — a long-lived app (Vortex, Telegram…) never "exits" to
+    # trigger the after-run harvest, so its browser-link handler has to be
+    # live while it runs, not after
+    harvest_schemes
+    # A first-ever launch registers its scheme mid-startup; catch that too,
+    # from a detached watcher, without blocking the app
+    ( sleep 8; harvest_schemes ) >/dev/null 2>&1 &
 
     # Snapshot existing shortcuts so an installer's new ones can be spotted
     local before="$BASE/.shortcuts.pre"
