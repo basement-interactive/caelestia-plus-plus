@@ -249,7 +249,6 @@ recovery_guard() {
     fsync_off) true ;;                                  # kernel sync issues: last simple lever
     combined)  true ;;                                  # everything applicable at once
     gpu_soft)  graphics_crash "$slice" ;;              # graphics death: CPU rendering, no GPU at all
-    vdesktop)  graphics_crash "$slice" ;;              # window/DPI/multi-monitor crash: single virtual screen
     esac
 }
 
@@ -261,7 +260,6 @@ recovery_human() {
     fsync_off) echo "turn off fsync" ;;
     combined)  echo "all compatibility fixes together" ;;
     gpu_soft)  echo "render without the GPU (slower, but reliable)" ;;
-    vdesktop)  echo "run in its own window (fixes multi-monitor/DPI crashes)" ;;
     esac
 }
 
@@ -277,7 +275,6 @@ recovery_env() {
     # OpenGL, OpenGL on Mesa's CPU rasteriser. Slow but sidesteps every GPU /
     # multi-GPU / driver bug — a program that renders anything renders here.
     gpu_soft)  echo 'export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}d3d9,d3d10core,d3d11,d3d12,d3d12core,dxgi=b"' ;;
-    vdesktop)  echo 'export POLYCARBON_VDESKTOP=1920x1080' ;;
     combined)
         recovery_guard gpu_prime "$slice" && recovery_env gpu_prime
         recovery_guard dxvk_off "$slice" && recovery_env dxvk_off
@@ -600,13 +597,6 @@ _new_window_since() { # $1 = window addresses captured before launch
 
 _prefix_busy() { pgrep -f "$RUNNER_DIR/bin/wine" >/dev/null 2>&1; }
 
-# Is the target program itself still alive? (Wine names each process after its
-# exe, comm truncated to 15 chars.) Used together with the window check so a
-# window that appears while the program is already dead — e.g. the empty frame
-# of a virtual desktop after the app inside it crashed — is not mistaken for
-# success.
-_app_alive() { pgrep -x "$(printf '%s' "$exe" | cut -c1-15)" >/dev/null 2>&1; }
-
 is_installer() {
     case "${1,,}" in
     *.msi) return 0 ;;
@@ -623,8 +613,8 @@ run_with_watchdog() {
     ( eval "$learned"; eval "$extra"; run_target "$target" "${appargs[@]}" ) &
     local launcher=$! t=0
     while :; do
-        if _new_window_since "$before" && _app_alive; then
-            wait "$launcher" 2>/dev/null      # window up + app alive: real session
+        if _new_window_since "$before"; then
+            wait "$launcher" 2>/dev/null      # window up: real session, block till closed
             "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
             return 0
         fi
@@ -663,15 +653,7 @@ run_target() {
         "$WINE" regedit "$(winpath "$target")" >>"$LOG" 2>&1
         ;;
     *)
-        if [ -n "${POLYCARBON_VDESKTOP:-}" ]; then
-            # Run inside a single virtual screen. This hides the host's real
-            # (possibly mixed-DPI, multi-monitor) layout from the program — the
-            # cure for apps that crash setting up per-monitor DPI, e.g.
-            # Telegram's __fastfail right after EnableNonClientDpiScaling.
-            "$WINE" explorer "/desktop=polycarbon,$POLYCARBON_VDESKTOP" "$target" "$@" >>"$LOG" 2>&1
-        else
-            "$WINE" "$target" "$@" >>"$LOG" 2>&1
-        fi
+        "$WINE" "$target" "$@" >>"$LOG" 2>&1
         ;;
     esac
 }
@@ -916,7 +898,7 @@ Full log: $LOG" dialog-error
     # The recovery ladder: each rung is a Wine quirk tried in its own restart.
     # "" = as-is (with any learned fix); the rest are attempted only if their
     # guard matches the crash, most-likely first, then everything combined.
-    local -a ladder=("" gpu_prime vdesktop dxvk_off wgi_off fsync_off combined gpu_soft)
+    local -a ladder=("" gpu_prime dxvk_off wgi_off fsync_off combined gpu_soft)
     local code started err failed step extra had_app_logs=""
     local -a tried=()
     # Guards read the signature of the LAST crash; each attempt is judged on
