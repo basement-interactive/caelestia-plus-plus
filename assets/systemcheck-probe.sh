@@ -181,7 +181,10 @@ echo "pacnew|$(printf '%s' "$pn" | grep -c .)|$(printf '%s' "$pn" | head -6 | tr
 if [ -e /var/lib/pacman/db.lck ] && ! pgrep -x pacman >/dev/null; then echo "paclock|stale"; else echo "paclock|ok"; fi
 echo "orphans|$(pacman -Qtdq 2>/dev/null | grep -c .)|$(pacman -Qtdq 2>/dev/null | head -10 | tr '\n' ' ')"
 echo "paccache|$(du -sBG /var/cache/pacman/pkg 2>/dev/null | cut -f1 | tr -d G)|$(command -v paccache >/dev/null && echo 1 || echo 0)"
-cor=$(pacman -Qk 2>/dev/null | awk -F': ' '$2 !~ /, 0 missing/ {sub(/:$/, "", $1); print $1}') || true
+# Per-file warnings on stderr carry the reason; count only files that are
+# actually gone. Running unprivileged, root-only paths (/boot, /var/named)
+# read as "Permission denied" — those are fine, root sees them.
+cor=$(LC_ALL=C pacman -Qk 2>&1 >/dev/null | awk -F': ' '/No such file or directory/ {print $2}' | sort -u) || true
 echo "corrupt|$(printf '%s' "$cor" | grep -c .)|$(printf '%s' "$cor" | head -8 | tr '\n' ' ')"
 
 # --- System health -----------------------------------------------------------
