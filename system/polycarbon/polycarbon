@@ -964,10 +964,13 @@ Full log: $LOG" dialog-error
         fi
     done
 
-    # Exhausted the ladder — surface everything useful in one place.
+    # Exhausted the ladder — capture the REAL cause with full diagnostics, then
+    # surface everything in one place.
     if [ -n "$failed" ]; then
+        diagnose_failure
         write_failure_report "$exe" "$code" "${tried[*]}" "$crash_slice"
         local report; report=$(salient_error "$crash_slice")
+        [ -z "$report" ] && report=$(cat "$BASE/.diag-summary" 2>/dev/null)
         [ -z "$report" ] && [ "$code" = 124 ] && report="Kept hanging with no window."
         notify "$exe couldn't be recovered" "${report:-Exited with code $code, no window.}
 Tried: ${tried[*]:-none}. Full details: $LOG" dialog-error
@@ -980,6 +983,68 @@ Tried: ${tried[*]:-none}. Full details: $LOG" dialog-error
     exit "$code"
 }
 
+# The normal run is silent (WINEDEBUG=-all) for clean logs. When nothing could
+# recover a program, that silence hides the reason — so run it ONE more time
+# with full Wine diagnostics on and capture what actually happened: a crash
+# and its backtrace (which module/function faulted), an unimplemented API call,
+# a device/display error, or — if none of that — the fact that it exited on its
+# own with no error (a deliberate quit, not a crash). Reads $target/$exe/
+# $appargs/$learned from the caller (bash dynamic scope).
+diagnose_failure() {
+    logmsg "no fix worked — running one diagnostic pass with full logging to capture the cause"
+    kill_stale "$exe"
+    local dlog="$BASE/diagnostic.log" dir
+    dir=$(dirname "$target")
+    : > "$dlog"
+    local before_dumps; before_dumps=$(find "$dir" -iname '*.dmp' 2>/dev/null | sort)
+    (
+        cd "$dir" || exit 1
+        eval "$learned"
+        # err+all: every real error, including the unhandled-exception report
+        # and its backtrace (which module/function faulted). fixme+all: every
+        # unimplemented call — the last few before a deliberate quit are the
+        # clue for why the program gave up. (No +seh: its trace floods the log.)
+        export WINEDEBUG="err+all,fixme+all"
+        timeout "$WATCHDOG_GRACE" "$WINE" "$target" "${appargs[@]}"
+    ) >"$dlog" 2>&1
+    "$RUNNER_DIR/bin/wineserver" -k 2>/dev/null
+
+    # Real failure signals: unhandled exceptions + their backtrace, module/load
+    # errors, wine diagnostics, assertions. (Plain err: lines, not fixme noise.)
+    local hits
+    hits=$(grep -anE 'err:|Unhandled exception|[Bb]acktrace:|assertion|[Ff]atal error|Call to unimplemented' "$dlog" 2>/dev/null | tail -30)
+    # A crash the app caught itself (Breakpad) leaves a minidump but no Wine
+    # error — decode it if the tooling is around, else at least name it.
+    local newdump; newdump=$(comm -13 <(printf '%s\n' "$before_dumps") <(find "$dir" -iname '*.dmp' 2>/dev/null | sort) | head -1)
+
+    {
+        echo "--- diagnostic run (full Wine logging) ---"
+        if [ -n "$hits" ]; then
+            printf '%s\n' "$hits"
+        elif [ -n "$newdump" ]; then
+            echo "the program crashed and caught it itself (minidump: ${newdump##*/})"
+            if command -v minidump_stackwalk >/dev/null 2>&1; then
+                minidump_stackwalk "$newdump" 2>/dev/null | grep -aiE 'crash reason|crash address|^ ?0 ' | head -8
+            fi
+        else
+            echo "Wine emitted no error and no crash was caught — the program exited on its own (a deliberate quit, not a crash). Its final output before exiting:"
+            grep -avE 'fixme:' "$dlog" | tail -20
+            echo "…last unimplemented calls it hit (a clue to what it couldn't do):"
+            grep -aE 'fixme:' "$dlog" | tail -8
+        fi
+        echo "--- full diagnostic log: $dlog ---"
+    } >> "$LOG"
+
+    # One-line takeaway for the notification
+    if [ -n "$hits" ]; then
+        printf '%s' "$hits" | grep -aiE 'exception|:err:|assertion|fatal|unimplemented' | tail -1 | sed 's/^[0-9]*://;s/^[[:space:]]*//' | cut -c1-200 > "$BASE/.diag-summary"
+    elif [ -n "$newdump" ]; then
+        echo "Crashed internally (caught by its own handler) — see the diagnostic log." > "$BASE/.diag-summary"
+    else
+        echo "Exited on its own — a deliberate quit, not a crash. See the diagnostic log for its last activity." > "$BASE/.diag-summary"
+    fi
+}
+
 # When recovery gives up, dump a verbose, self-contained diagnostic block into
 # the log: the exact fixes attempted, the GPUs seen, the runtime/version, and
 # every crash dump found — so one look at last-run.log tells the whole story.
@@ -990,7 +1055,8 @@ write_failure_report() { # exe code tried crash-slice
         echo "runtime: $(cat "$BASE/runner.version" 2>/dev/null)   exit code: $2"
         echo "recovery fixes attempted: ${3:-none}"
         grep -aoE '^info:  Found device: .*' "$LOG" | sed 's/^info:  /GPU: /' | sort -u
-        echo "diagnostic line: $(salient_error "${4:-$LOG}")"
+        local dline; dline=$(salient_error "${4:-$LOG}"); [ -z "$dline" ] && dline=$(cat "$BASE/.diag-summary" 2>/dev/null)
+        echo "what went wrong: ${dline:-unknown — see the diagnostic section above}"
         echo "if this is a game/GPU app, editing $POLY_ENV by hand can help — see the notes in it"
         echo "========================================================"
     } >> "$LOG"
