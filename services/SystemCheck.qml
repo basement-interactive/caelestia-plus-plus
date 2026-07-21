@@ -360,7 +360,7 @@ Singleton {
 
         const corrupt = parseInt(flags.corrupt?.[0] ?? "0", 10);
         push("corrupt-pkgs", corrupt > 0 ? qsTr("%1 packages have missing files").arg(corrupt) : qsTr("All package files present"), corrupt > 0 ? qsTr("%1 — files these packages installed are gone from disk (deleted or corrupted); reinstalling restores them").arg(flags.corrupt?.[1] ?? "") : qsTr("pacman -Qk finds nothing missing"), corrupt > 0 ? "warn" : "ok", corrupt > 0 ? {
-            fix: Object.assign({label: qsTr("Reinstall")}, _pacmanFix(qsTr("Reinstalls the affected packages with pacman, restoring their missing files. Configs in /etc marked as backup files are preserved by pacman."), ["pacman -S --noconfirm $(pacman -Qk 2>/dev/null | awk -F': ' '$2 !~ /, 0 missing/ {sub(/:$/, \"\", $1); print $1}')"]))
+            fix: Object.assign({label: qsTr("Reinstall")}, _pacmanFix(qsTr("Reinstalls the affected packages with pacman, restoring their missing files. Configs in /etc marked as backup files are preserved by pacman."), ["p=$(pacman -Qk 2>/dev/null | awk -F': ' '$2 !~ /, 0 missing/ {sub(/:$/, \"\", $1); print $1}'); [ -n \"$p\" ] && pacman -S --noconfirm $p || echo 'nothing missing anymore'"]))
         } : null);
 
         const orphans = parseInt(flags.orphans?.[0] ?? "0", 10);
