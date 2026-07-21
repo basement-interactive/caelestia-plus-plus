@@ -24,9 +24,14 @@
 # as desktop notifications, never as terminal output or dialogs.
 set -u
 
-SODA_VER="soda-9.0-1"
-SODA_URL="https://github.com/bottlesdevs/wine/releases/download/${SODA_VER}/${SODA_VER}-x86_64.tar.xz"
-SODA_SHA256="c38fe0ad3c12a49b61ec1fcaea5c5d8da4a3d1afc5991befe2af6b125f014c28"
+# Kron4ek's wine-staging (wow64: one build runs 64- and 32-bit apps). Chosen
+# over Bottles' Soda: Soda 9.0 is a stripped early-2024 gaming build missing
+# modern APIs (no SetThreadpoolTimerEx, Win8.1-era) that crashes real desktop
+# apps like Telegram before they can even create a GL context. Staging is
+# current, complete, and still fsync-enabled for games.
+RUNNER_VER="wine-11.13-staging"
+RUNNER_URL="https://github.com/Kron4ek/Wine-Builds/releases/download/11.13/wine-11.13-staging-amd64-wow64.tar.xz"
+RUNNER_SHA256="47d9e8098d5e5204c6d0d5054526389634d83bb78fbb3bab9f297f9cb226be09"
 
 # Bump when anything in the component set below changes; installed prefixes
 # catch up on their next launch
@@ -38,9 +43,12 @@ WINETRICKS_VER="20260125"
 WINETRICKS_URL="https://raw.githubusercontent.com/Winetricks/winetricks/${WINETRICKS_VER}/src/winetricks"
 WINETRICKS_SHA256="431f82fc74000e6c864409f1d8fb495d696c03928808e3e8acffc45179312a7b"
 # Reliable, non-interactive verbs most Windows software expects to find.
-# .NET is covered by wine-mono, so winetricks' heavy dotnet verbs are left
-# out on purpose. Each is best-effort — a verb that fails never blocks a run.
-WINETRICKS_VERBS="corefonts vcrun2022 vcrun2019 vcrun2013 vcrun2010 d3dcompiler_47 d3dx9"
+# vcrun2022 is the unified VC++ 2015-2022 runtime and CONFLICTS with the
+# 2015/2017/2019 verbs, so only it is listed for that era; vcrun2013 and
+# vcrun2010 are separate older runtimes. .NET is covered by wine-mono, so
+# winetricks' heavy dotnet verbs are left out on purpose. Each verb is
+# best-effort — a failure never blocks a run.
+WINETRICKS_VERBS="corefonts vcrun2022 vcrun2013 vcrun2010 d3dcompiler_47 d3dx9"
 DXVK_VER="3.0.2"
 DXVK_URL="https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VER}/dxvk-${DXVK_VER}.tar.gz"
 DXVK_SHA256="9c538924110a7cdef871ca36dee218c0774124374ffdeb38af4b76be55bdf7c2"
@@ -99,20 +107,35 @@ vulkan_ok() {
 }
 
 install_runner() {
-    [ -x "$WINE" ] && [ "$(cat "$BASE/runner.version" 2>/dev/null)" = "$SODA_VER" ] && return 0
-    say "downloading $SODA_VER runner (~60 MB)..."
-    notify "Setting up Windows apps" "One-time download of the $SODA_VER runner (~60 MB)…" folder-download
-    fetch "$SODA_URL" "$SODA_SHA256" "$BASE/runner.tar.xz"
+    [ -x "$WINE" ] && [ "$(cat "$BASE/runner.version" 2>/dev/null)" = "$RUNNER_VER" ] && return 0
+    # A runner change (e.g. Soda -> staging) means the prefix was built on the
+    # old Wine; drop the version stamp so init_prefix re-runs wineboot to
+    # migrate it to the new build
+    [ -f "$BASE/runner.version" ] && [ "$(cat "$BASE/runner.version")" != "$RUNNER_VER" ] && needs_reboot=1
+    say "downloading $RUNNER_VER runner (~95 MB)..."
+    notify "Setting up Windows apps" "One-time download of the $RUNNER_VER runner (~95 MB)…" folder-download
+    fetch "$RUNNER_URL" "$RUNNER_SHA256" "$BASE/runner.tar.xz"
     rm -rf "$RUNNER_DIR.new" "$RUNNER_DIR"
     mkdir -p "$RUNNER_DIR.new"
     tar -xJf "$BASE/runner.tar.xz" --strip-components=1 -C "$RUNNER_DIR.new" || die "Windows runner unpack failed" "See $LOG"
     mv "$RUNNER_DIR.new" "$RUNNER_DIR"
-    echo "$SODA_VER" > "$BASE/runner.version"
+    echo "$RUNNER_VER" > "$BASE/runner.version"
     rm -f "$BASE/runner.tar.xz"
 }
 
+needs_reboot=""
+
 init_prefix() {
-    [ -f "$WINEPREFIX/system.reg" ] && return 0
+    if [ -f "$WINEPREFIX/system.reg" ]; then
+        # Existing prefix, but the runner just changed under it — migrate the
+        # prefix to the new Wine (updates system DLLs) without wiping user data
+        if [ -n "$needs_reboot" ]; then
+            say "migrating the Windows environment to the new runner..."
+            env WINEDLLOVERRIDES="mscoree=;mshtml=" "$RUNNER_DIR/bin/wineboot" -u >>"$LOG" 2>&1 || true
+            "$RUNNER_DIR/bin/wineserver" -w
+        fi
+        return 0
+    fi
     say "preparing the shared Windows environment..."
     notify "Preparing Windows environment" "First run only, takes a moment…" preferences-system
     # mono/gecko are suppressed only for this bootstrap (their download
@@ -166,28 +189,41 @@ install_bindings() {
         fetch "$WINETRICKS_URL" "$WINETRICKS_SHA256" "$wt"
         chmod +x "$wt"
     fi
+    # Per-verb ledger: a verb that already succeeded is never re-attempted, so
+    # one persistently flaky verb (a down mirror) can't drag every launch back
+    # through the whole set — only the missing verbs retry.
+    local done_file="$BASE/bindings.done"
+    touch "$done_file"
+    local pending=""
+    local verb
+    for verb in $WINETRICKS_VERBS; do
+        grep -qxF "$verb" "$done_file" || pending="$pending $verb"
+    done
+    [ -n "$pending" ] || { echo "$BINDINGS_VER" > "$BASE/bindings.version"; return 0; }
+
     say "installing runtime libraries (VC++ runtimes, core fonts, D3D compiler)..."
     notify "Installing Windows runtime libraries" "One-time: the runtimes most programs expect…" folder-download
     # winetricks must use this runner, not any system wine; --unattended
-    # answers every installer dialog. Verbs run one at a time so one failure
-    # (e.g. a flaky mirror) doesn't take the rest down with it.
-    local ok=0 verb
-    for verb in $WINETRICKS_VERBS; do
+    # answers every installer dialog. One verb at a time so a single failure
+    # doesn't take the rest down.
+    for verb in $pending; do
         say "  · $verb"
         if env WINE="$WINE" WINESERVER="$RUNNER_DIR/bin/wineserver" PATH="$RUNNER_DIR/bin:$PATH" \
             "$wt" -q --unattended "$verb" >>"$LOG" 2>&1; then
-            ok=$((ok + 1))
+            echo "$verb" >> "$done_file"
         else
             say "    ($verb skipped — will retry on a later setup)"
         fi
     done
     "$RUNNER_DIR/bin/wineserver" -w
-    # Only stamp as done when every verb landed; a partial set retries next
-    # time instead of being declared finished
-    local total
-    total=$(echo "$WINETRICKS_VERBS" | wc -w)
-    [ "$ok" -eq "$total" ] && echo "$BINDINGS_VER" > "$BASE/bindings.version"
-    say "runtime libraries: $ok/$total installed"
+
+    # Stamp as fully done only when the ledger covers the whole set
+    local missing=""
+    for verb in $WINETRICKS_VERBS; do
+        grep -qxF "$verb" "$done_file" || missing="$missing $verb"
+    done
+    [ -n "$missing" ] || echo "$BINDINGS_VER" > "$BASE/bindings.version"
+    say "runtime libraries ready"
 }
 
 _dll_native() { # dll...

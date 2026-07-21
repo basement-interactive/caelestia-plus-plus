@@ -366,7 +366,7 @@ Singleton {
 
         // -- Polycarbon (Windows app runner)
         const [wrVer, wrPrefix, wrComp, wrBind] = flags.polycarbon ?? [];
-        const polycarbonSetupFix = Object.assign({label: qsTr("Set up")}, _userFix(qsTr("Downloads the Soda runner plus the full compatibility stack (wine-mono for .NET, wine-gecko for embedded HTML, DXVK and VKD3D-Proton for Direct3D 8-12 on Vulkan machines) and the winetricks runtime libraries (VC++ runtimes, core fonts, D3D shader compiler) — all checksum-pinned, all unattended. Also points the Windows user folders at your real Linux ones. Everything lives under ~/.local/share/caelestia/polycarbon; nothing system-wide changes."), [`bash '${Quickshell.shellDir}/system/polycarbon/polycarbon' --setup`]));
+        const polycarbonSetupFix = Object.assign({label: qsTr("Set up")}, _userFix(qsTr("Downloads the Wine runner (wine-staging) plus the full compatibility stack (wine-mono for .NET, wine-gecko for embedded HTML, DXVK and VKD3D-Proton for Direct3D 8-12 on Vulkan machines) and the winetricks runtime libraries (VC++ runtimes, core fonts, D3D shader compiler) — all checksum-pinned, all unattended. Also points the Windows user folders at your real Linux ones. Everything lives under ~/.local/share/caelestia/polycarbon; nothing system-wide changes."), [`bash '${Quickshell.shellDir}/system/polycarbon/polycarbon' --setup`]));
         if (wrVer && wrVer !== "none" && wrComp !== "none" && wrBind !== "none")
             push("polycarbon", qsTr("Polycarbon ready"), qsTr("%1 — double-click any .exe and it runs (64/32-bit, .NET, HTML, Direct3D 8-12, VC++ runtimes); installers add themselves to your app menu").arg(wrVer), "ok");
         else if (wrVer && wrVer !== "none")
