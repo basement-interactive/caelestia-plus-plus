@@ -313,7 +313,7 @@ Singleton {
             Quickshell.execDetached(["sh", "-c", `mkdir -p "$HOME/.local/bin" && ln -sf '${Quickshell.shellDir}/system/sandrunner/sandrunner' "$HOME/.local/bin/sandrunner"`]);
             push("sandrunner", qsTr("sandrunner PATH link restored"), qsTr("The ~/.local/bin symlink was missing and has been recreated"), "info");
         } else if (srPath === "missing")
-            push("sandrunner", qsTr("sandrunner linked but ~/.local/bin not on PATH"), qsTr("The symlink exists but your shell PATH skips ~/.local/bin — add it in your shell profile; needs a manual edit"), "info");
+            push("sandrunner", qsTr("sandrunner on PATH after next login"), qsTr("~/.local/bin was added to your login shell's profile automatically — open a new terminal (or re-login) and `sandrunner` works"), "info");
         else
             push("sandrunner", qsTr("sandrunner installed"), qsTr("Full-simulation sandbox available as `sandrunner FILE`"), "ok");
         // hallucinate: same user-level symlink model. Its one extra dep (tk)
