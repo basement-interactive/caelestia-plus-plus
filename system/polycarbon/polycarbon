@@ -318,7 +318,14 @@ confine_setup() { # target-path
     *) CONFINE+=(--ro-bind / /) ;;   # app: own files only
     esac
     [ -d "$tdir" ] && CONFINE+=(--bind "$tdir" "$tdir")
-    CONFINE+=(--bind "$BASE" "$BASE" --bind /tmp /tmp --dev-bind /dev /dev --proc /proc)
+    # $BASE holds three things the sandboxed app must NOT write: perms/ (it
+    # could set its own ROOT=on and escape next launch), quirks/*.env (those
+    # are eval'd UNCONFINED by polycarbon on later launches — arbitrary host
+    # exec), and runner/ (the wine binary polycarbon itself runs). Mount the
+    # whole tree read-only, then re-bind only the Wine prefix writable — that
+    # is the only part a running app legitimately writes to.
+    CONFINE+=(--ro-bind "$BASE" "$BASE" --bind "$WINEPREFIX" "$WINEPREFIX")
+    CONFINE+=(--bind /tmp /tmp --dev-bind /dev /dev --proc /proc)
     [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] && CONFINE+=(--bind "$XDG_RUNTIME_DIR" "$XDG_RUNTIME_DIR")
     [ "$(perm_get "$pf" NET on)" = off ] && CONFINE+=(--unshare-net)
     logmsg "sandbox: files=$files net=$(perm_get "$pf" NET on)${mem:+ mem=$mem}${cpu:+ cpu=$cpu%}"
@@ -638,15 +645,18 @@ install_components() {
         say "installing DXVK $DXVK_VER (Direct3D 8-11 over Vulkan)..."
         fetch "$DXVK_URL" "$DXVK_SHA256" "$tmp/dxvk.tar.gz"
         tar -xzf "$tmp/dxvk.tar.gz" -C "$tmp" || die "DXVK unpack failed" "See $LOG"
-        cp "$tmp/dxvk-$DXVK_VER/x64/"*.dll "$WINEPREFIX/drive_c/windows/system32/"
-        cp "$tmp/dxvk-$DXVK_VER/x32/"*.dll "$WINEPREFIX/drive_c/windows/syswow64/"
+        # A layout change in the tarball would make these globs match nothing;
+        # unchecked, _dll_native would then point D3D at DLLs that aren't there
+        # and every Direct3D app would break with no error logged anywhere.
+        cp "$tmp/dxvk-$DXVK_VER/x64/"*.dll "$WINEPREFIX/drive_c/windows/system32/" || die "DXVK install failed" "See $LOG"
+        cp "$tmp/dxvk-$DXVK_VER/x32/"*.dll "$WINEPREFIX/drive_c/windows/syswow64/" || die "DXVK install failed" "See $LOG"
         _dll_native d3d8 d3d9 d3d10core d3d11 dxgi
 
         say "installing VKD3D-Proton $VKD3D_VER (Direct3D 12 over Vulkan)..."
         fetch "$VKD3D_URL" "$VKD3D_SHA256" "$tmp/vkd3d.tar.zst"
         tar --zstd -xf "$tmp/vkd3d.tar.zst" -C "$tmp" || die "VKD3D unpack failed" "See $LOG"
-        cp "$tmp/vkd3d-proton-$VKD3D_VER/x64/"*.dll "$WINEPREFIX/drive_c/windows/system32/"
-        cp "$tmp/vkd3d-proton-$VKD3D_VER/x86/"*.dll "$WINEPREFIX/drive_c/windows/syswow64/"
+        cp "$tmp/vkd3d-proton-$VKD3D_VER/x64/"*.dll "$WINEPREFIX/drive_c/windows/system32/" || die "VKD3D install failed" "See $LOG"
+        cp "$tmp/vkd3d-proton-$VKD3D_VER/x86/"*.dll "$WINEPREFIX/drive_c/windows/syswow64/" || die "VKD3D install failed" "See $LOG"
         _dll_native d3d12 d3d12core
     else
         say "no Vulkan driver found - skipping DXVK/VKD3D, Direct3D runs on OpenGL"
@@ -674,6 +684,27 @@ ensure_ready() {
     link_filesystem   # cheap + idempotent; also upgrades pre-existing prefixes
     install_bindings
     flock -u 9
+}
+
+# The name of the process a target will actually run as. For a .exe it is
+# the basename; for a .lnk (what harvested launchers pass) the process is
+# named after the .lnk's TARGET exe, not the .lnk — so kill_stale/_app_alive/
+# the window-class checks must key on the target. The target path is embedded
+# in the binary .lnk; pull the last .exe out of it. Falls back to the .lnk
+# basename if extraction finds nothing.
+resolve_exe() { # target-path -> process/exe basename
+    case "${1,,}" in
+    *.lnk)
+        local hit
+        hit=$( { strings -e l "$1" 2>/dev/null; strings "$1" 2>/dev/null; } \
+            | grep -ioE '[a-z0-9_. -]+\.exe' | grep -iv '^ *$' | tail -1)
+        hit=$(basename "$hit" 2>/dev/null)
+        printf '%s' "${hit:-$(basename "$1")}"
+        ;;
+    *)
+        basename "$1"
+        ;;
+    esac
 }
 
 # Kill any lingering instances of THIS program before launching. Stale copies
@@ -735,9 +766,21 @@ clear_audio_endpoint_cache() {
 # legitimately run windowless, so they skip the watchdog and just block.
 WATCHDOG_GRACE=${POLYCARBON_GRACE:-40}
 
+# Window addresses belonging to THIS app only. Wine sets each window's class
+# to the exe basename, so filtering by class keeps an unrelated window that
+# opens during the grace period (a terminal, another app's popup) from being
+# mistaken for the app coming up. $exe is read from the caller (dynamic scope).
 _win_addrs() {
     command -v hyprctl >/dev/null 2>&1 || return 0
-    hyprctl clients -j 2>/dev/null | grep -oE '"address": *"[^"]+"' | sort -u
+    hyprctl clients -j 2>/dev/null | python3 -c '
+import json, sys
+try: clients = json.load(sys.stdin)
+except ValueError: sys.exit(0)
+exe = sys.argv[1].lower()
+for c in clients:
+    if c.get("class", "").lower() == exe:
+        print(c.get("address", ""))
+' "$exe" 2>/dev/null | sort -u
 }
 
 _new_window_since() { # $1 = window addresses captured before launch
@@ -753,7 +796,11 @@ _comm_re() { printf '%s' "$1" | cut -c1-15 | sed 's/[].*^$()+?{|[\\]/\\&/g'; }
 # same dynamic scope as run_with_watchdog.
 _app_alive() { pgrep -x "$(_comm_re "$exe")" >/dev/null 2>&1; }
 
-_prefix_busy() { pgrep -f "$RUNNER_DIR/bin/wine" >/dev/null 2>&1; }
+# True when an actual Wine APP is running on the prefix. The pattern is
+# anchored past "wine" so it never matches "$RUNNER_DIR/bin/wineserver" —
+# a lone wineserver lingering after the last app exited is NOT a busy prefix,
+# and treating it as one skipped the audio-cache fix and stalled the watchdog.
+_prefix_busy() { pgrep -f "$RUNNER_DIR/bin/wine(64)? " >/dev/null 2>&1 || pgrep -f "$RUNNER_DIR/bin/wine(64)?\$" >/dev/null 2>&1; }
 
 is_installer() {
     # Judge the FILE, not its path — /home/x/Installers/app.exe is not an installer
@@ -1093,9 +1140,16 @@ main() {
         logmsg "opening link: $1"
         dispatch_url "$1"
         local ucode=$?
-        local uerr; uerr=$(salient_error)
-        [ -n "$uerr" ] && notify "Link failed" "$uerr
+        # Only surface a failure toast when the handoff actually failed.
+        # dispatch_url runs the app in the foreground for the whole session,
+        # so its log picks up benign matching lines during normal use — toasting
+        # "Link failed" when the user simply closes the app later is wrong.
+        if [ "$ucode" -ne 0 ]; then
+            local uerr; uerr=$(salient_error)
+            [ -n "$uerr" ] || uerr="The Windows program could not open the link."
+            notify "Link failed" "$uerr
 Full log: $LOG" dialog-error
+        fi
         exit "$ucode"
     fi
 
@@ -1106,6 +1160,10 @@ Full log: $LOG" dialog-error
     new_log
     [ -e "$target" ] || die "File not found" "$target"
     logmsg "launching $(basename "$target")"
+    # The process name this target runs as (a .lnk runs as its target exe,
+    # not the .lnk) — everything that matches the running app keys on this.
+    local exe; exe=$(resolve_exe "$target")
+
     # First launch of this program: ask how much access it should have.
     # Every launch then builds its confinement from the saved answer.
     ask_first_run "$target"
@@ -1114,7 +1172,7 @@ Full log: $LOG" dialog-error
     # stale copies keep wineserver alive, and the runtime auto-updater defers
     # whenever it sees Wine running — so zombies would block the auto-update
     # forever (the exact reason a runtime got stuck and needed a manual update).
-    kill_stale "$(basename "$target")"
+    kill_stale "$exe"
     ensure_ready
     clear_audio_endpoint_cache
 
@@ -1127,21 +1185,24 @@ Full log: $LOG" dialog-error
     # from a detached watcher, without blocking the app
     ( sleep 8; harvest_schemes ) >/dev/null 2>&1 &
 
+    # Transient per-run state is suffixed with the pid so two apps launched
+    # at once (normal usage — double-clicking two .exe files) don't corrupt
+    # each other: shared fixed paths would let one run's snapshot/marker/slice
+    # clobber the other's mid-flight. A trap cleans them on any exit.
+    local run=$$ shortcut_watcher=""
+    trap 'rm -f "$BASE/.shortcuts.pre.$run" "$BASE/.launch-marker.$run" "$BASE/.attempt.$run.log" "$BASE/.attempt.$run.log.crash" 2>/dev/null; [ -n "$shortcut_watcher" ] && kill "$shortcut_watcher" 2>/dev/null' EXIT
+
     # Snapshot existing shortcuts so an installer's new ones can be spotted
-    local before="$BASE/.shortcuts.pre"
+    local before="$BASE/.shortcuts.pre.$run"
     _list_shortcuts > "$before"
     # Harvest new shortcuts live during the run, so a setup wizard's entries
     # reach the app menu the moment it writes them (not only after it exits).
-    # A trap kills it on ANY exit path (including die) so it never outlives
-    # the launch as an orphan poller.
-    local shortcut_watcher; shortcut_watcher=$(watch_shortcuts "$before")
-    trap 'kill "$shortcut_watcher" 2>/dev/null' EXIT
+    shortcut_watcher=$(watch_shortcuts "$before")
 
     # Marker so we can later tell which log/dump files THIS run produced
-    local marker="$BASE/.launch-marker"
+    local marker="$BASE/.launch-marker.$run"
     : > "$marker"
 
-    local exe; exe=$(basename "$target")
     local -a appargs=("$@")
     local qf="$QUIRKS_DIR/$exe.env"
     mkdir -p "$QUIRKS_DIR"
@@ -1163,7 +1224,7 @@ Full log: $LOG" dialog-error
     # Guards read the signature of the LAST crash; each attempt is judged on
     # its OWN output slice, so an earlier crash's error never taints a later
     # working attempt.
-    local slice="$BASE/.attempt.log" crash_slice="$LOG" rung_start
+    local slice="$BASE/.attempt.$run.log" crash_slice="$LOG" rung_start
 
     for step in "${ladder[@]}"; do
         if [ -n "$step" ]; then
@@ -1196,17 +1257,23 @@ Full log: $LOG" dialog-error
         fi
         logmsg "$exe finished/settled with code $code after $((SECONDS - started))s"
 
-        had_app_logs=""
-        collect_app_logs "$(dirname "$target")" "$marker" && had_app_logs=1
-        # This attempt's output only — everything the log grew by since launch
+        # Cut the verdict slice from WINE's own output for this attempt FIRST,
+        # before folding in the program's own logs — collect_app_logs tails
+        # app logs that may carry stale errors from previous sessions, and
+        # those must not taint whether THIS launch failed.
         tail -n +$((rung_start + 1)) "$LOG" > "$slice" 2>/dev/null
         err=$(salient_error "$slice")
+        had_app_logs=""
+        collect_app_logs "$(dirname "$target")" "$marker" && had_app_logs=1
         # A failure worth recovering from is one where the program never got
         # going: it hung (124), or it exited fast with an error/nonzero code.
         # A clean exit, or a nonzero after a real windowed session, is a normal
-        # quit and must not trigger restarts.
+        # quit and must not trigger restarts. Installers are exempt entirely:
+        # a nonzero installer exit is a user cancel or a real install error to
+        # REPORT, not a crash to "recover" by relaunching it with GPU tweaks.
         failed=""
-        if [ "$code" = 124 ] || { [ $((SECONDS - started)) -lt 15 ] && { [ -n "$err" ] || [ "$code" -ne 0 ]; }; }; then
+        if ! is_installer "$target" \
+            && { [ "$code" = 124 ] || { [ $((SECONDS - started)) -lt 15 ] && { [ -n "$err" ] || [ "$code" -ne 0 ]; }; }; }; then
             failed=1
             crash_slice="$slice.crash"
             cp -f "$slice" "$crash_slice" 2>/dev/null   # stable copy for the next guard
@@ -1269,7 +1336,17 @@ diagnose_failure() {
         # unimplemented call — the last few before a deliberate quit are the
         # clue for why the program gave up. (No +seh: its trace floods the log.)
         export WINEDEBUG="err+all,fixme+all"
-        timeout "$WATCHDOG_GRACE" "$WINE" "$target" "${appargs[@]}"
+        # Run it the SAME way the real launch did: dispatch by extension (a
+        # bare "$WINE $target" can't start a .lnk/.msi/.bat and would itself
+        # error, making the "diagnosis" meaningless) and under the app's
+        # confinement so a restricted app isn't handed one free unconfined
+        # pass. $CONFINE is empty for unrestricted apps.
+        case "${target,,}" in
+        *.lnk)  timeout "$WATCHDOG_GRACE" "${CONFINE[@]}" "$WINE" start /wait /unix "$target" ;;
+        *.msi)  timeout "$WATCHDOG_GRACE" "${CONFINE[@]}" "$WINE" msiexec /i "$target" "${appargs[@]}" ;;
+        *.bat|*.cmd) timeout "$WATCHDOG_GRACE" "${CONFINE[@]}" "$WINE" cmd /c "$(winpath "$target")" "${appargs[@]}" ;;
+        *)      timeout "$WATCHDOG_GRACE" "${CONFINE[@]}" "$WINE" "$target" "${appargs[@]}" ;;
+        esac
     ) >"$dlog" 2>&1
     # Clear only this program's leftovers — other apps may be live on the prefix
     pkill -9 -x "$(_comm_re "$exe")" 2>/dev/null
