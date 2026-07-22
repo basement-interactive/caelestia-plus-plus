@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""Polyscrubber — the Polycarbon in-app overlay.
+
+Part of Polycarbon, not the desktop: it only ever appears inside a
+Polycarbon (Wine) window. Insert toggles it; if the focused window isn't
+a Polycarbon app, nothing opens. Once open it docks to the app window's
+top-left corner and follows it — moves with the app, dies with the app —
+so it reads as the app's own overlay, ImGui-style: the compact dark
+panel with blue-tinted headers every game tool uses.
+"""
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import GLib, Gdk, Gtk  # noqa: E402
+
+BASE = os.path.join(
+    os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
+    "caelestia/polycarbon",
+)
+PIDFILE = os.path.join(BASE, ".polyscrubber.pid")
+APP_ID = "polyscrubber"
+
+# Dear ImGui dark theme, translated to CSS. Colors are the stock
+# ImGui::StyleColorsDark() values so the look reads instantly as ImGui.
+CSS = b"""
+window { background: rgba(15, 15, 15, 0.94); }
+* {
+    color: rgb(255, 255, 255);
+    font: 11pt monospace;
+    border-radius: 0;
+}
+.titlebar {
+    background: rgb(41, 74, 122);       /* TitleBgActive */
+    padding: 4px 8px;
+}
+.titlebar label { font-weight: bold; }
+.section > label {
+    background: rgba(66, 150, 250, 0.31);   /* Header */
+    padding: 3px 6px;
+}
+.body { padding: 8px; }
+.kv { color: rgb(178, 178, 178); }
+button {
+    background: rgba(66, 150, 250, 0.40);   /* Button */
+    border: 1px solid rgba(110, 110, 128, 0.50);
+    padding: 3px 10px;
+    box-shadow: none;
+    text-shadow: none;
+}
+button:hover { background: rgba(66, 150, 250, 0.65); }
+button:active { background: rgba(15, 135, 250, 0.9); }
+.hint { color: rgb(128, 128, 128); font-size: 9pt; }
+frame { border: 1px solid rgba(110, 110, 128, 0.50); }
+"""
+
+
+def hyprctl_json(*args):
+    try:
+        out = subprocess.run(["hyprctl", "-j", *args], capture_output=True,
+                             text=True, timeout=2).stdout
+        return json.loads(out)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def focused_polycarbon_app():
+    """The Wine window that was active when the overlay opened, or None."""
+    win = hyprctl_json("activewindow")
+    if not win or not win.get("class"):
+        return None
+    pid = win.get("pid", 0)
+    # A Polycarbon app is a process running out of our prefix; the class
+    # alone (foo.exe) is the fallback for when /proc has already gone away.
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            if BASE.encode() in f.read():
+                return win
+    except OSError:
+        pass
+    if re.search(r"\.exe$", win["class"], re.IGNORECASE):
+        return win
+    return None
+
+
+def perm_summary(cls):
+    key = re.sub(r"\.[^.]*$", "", cls).lower()
+    path = os.path.join(BASE, "perms", f"{key}.perm")
+    perm = {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(r"^([A-Z]+)=(.*)$", line.strip())
+                if m:
+                    perm[m.group(1)] = m.group(2)
+    except OSError:
+        return "full access (no profile yet)"
+    if perm.get("ROOT", "on") == "on":
+        return "full access"
+    bits = [f"files: {perm.get('FILES', 'full')}",
+            f"net: {perm.get('NET', 'on')}"]
+    if perm.get("MEM"):
+        bits.append(f"mem: {perm['MEM']}")
+    if perm.get("CPU"):
+        bits.append(f"cpu: {perm['CPU']}%")
+    return "sandboxed — " + ", ".join(bits)
+
+
+OFFSET = (16, 16)  # where the panel sits inside the app window
+
+
+class Overlay(Gtk.Window):
+    def __init__(self, app_win):
+        super().__init__(title="polyscrubber", decorated=False, resizable=False)
+        self.app_win = app_win
+        self.addr = None       # our own Hyprland window address, once mapped
+        self.last_pos = None
+        self.set_default_size(300, -1)
+        self.set_keep_above(True)
+        # Dock to the app and follow it — the overlay belongs to the app
+        # window, not the desktop
+        GLib.timeout_add(200, self.follow_app)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(root)
+
+        title = Gtk.Box(spacing=6)
+        title.get_style_context().add_class("titlebar")
+        title.pack_start(Gtk.Label(label="▼"), False, False, 0)
+        title.pack_start(Gtk.Label(label="polyscrubber", xalign=0), True, True, 0)
+        # ImGui windows drag by their title bar
+        bar = Gtk.EventBox()
+        bar.add(title)
+        bar.connect("button-press-event", self.on_drag)
+        root.pack_start(bar, False, False, 0)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        body.get_style_context().add_class("body")
+        root.pack_start(body, True, True, 0)
+
+        body.pack_start(self.app_section(), False, False, 0)
+        body.pack_start(self.actions_section(), False, False, 0)
+
+        hint = Gtk.Label(label="Insert / Esc to close", xalign=0)
+        hint.get_style_context().add_class("hint")
+        body.pack_start(hint, False, False, 0)
+
+        self.connect("key-press-event", self.on_key)
+        self.connect("destroy", Gtk.main_quit)
+
+    def app_section(self):
+        cls = self.app_win["class"]
+        box = self._section("app")
+        for k, v in (("exe", cls),
+                     ("title", self.app_win.get("title", "")[:40]),
+                     ("pid", str(self.app_win.get("pid", "?"))),
+                     ("perms", perm_summary(cls))):
+            row = Gtk.Label(xalign=0, wrap=True, label=f"{k:>6}  {v}")
+            row.get_style_context().add_class("kv")
+            box.get_child().pack_start(row, False, False, 0)
+        return box
+
+    def actions_section(self):
+        box = self._section("actions")
+        inner = box.get_child()
+        for label, cb in (("permissions", self.on_perms),
+                          ("open log", self.on_log),
+                          ("kill app", self.on_kill)):
+            b = Gtk.Button(label=label)
+            b.connect("clicked", cb)
+            inner.pack_start(b, False, False, 0)
+        return box
+
+    @staticmethod
+    def _section(label):
+        frame = Gtk.Frame()
+        frame.get_style_context().add_class("section")
+        frame.set_label(label)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        inner.set_margin_top(4)
+        inner.set_margin_bottom(6)
+        inner.set_margin_start(6)
+        inner.set_margin_end(6)
+        frame.add(inner)
+        return frame
+
+    def follow_app(self):
+        """Glue the panel to the app window's corner; close when it dies."""
+        clients = hyprctl_json("clients") or []
+        app = next((c for c in clients
+                    if c.get("pid") == self.app_win.get("pid")
+                    and c.get("class") == self.app_win.get("class")), None)
+        if app is None:
+            self.destroy()          # the app closed — the overlay goes too
+            return False
+        if self.addr is None:
+            # Own window only — match by OUR pid, never just the class
+            # (a stacked second instance would grab the wrong window)
+            me = next((c for c in clients
+                       if c["class"] == APP_ID and c.get("pid") == os.getpid()),
+                      None)
+            self.addr = me and me["address"]
+        pos = (app["at"][0] + OFFSET[0], app["at"][1] + OFFSET[1])
+        if self.addr and pos != self.last_pos:
+            # hyprctl args are eval'd as Lua on this setup — dispatch via the
+            # hl API form, window targeted by address so focus never matters
+            subprocess.run(
+                ["hyprctl", "dispatch",
+                 f"hl.dsp.window.move({{ window = 'address:{self.addr}',"
+                 f" x = {pos[0]}, y = {pos[1]}, relative = false }})"],
+                capture_output=True)
+            self.last_pos = pos
+        return True
+
+    def on_drag(self, _w, event):
+        self.begin_move_drag(event.button, int(event.x_root),
+                             int(event.y_root), event.time)
+
+    def on_key(self, _w, event):
+        if event.keyval in (Gdk.KEY_Escape, Gdk.KEY_Insert):
+            self.destroy()
+
+    def on_perms(self, _b):
+        subprocess.Popen(
+            [sys.executable,
+             os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                          "polycarbon-config.py")])
+        self.destroy()
+
+    def on_log(self, _b):
+        subprocess.Popen(["xdg-open", os.path.join(BASE, "last-run.log")])
+        self.destroy()
+
+    def on_kill(self, _b):
+        pid = self.app_win.get("pid", 0)
+        if pid > 1:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        self.destroy()
+
+
+def other_instance():
+    try:
+        with open(PIDFILE, encoding="ascii") as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+def main():
+    if pid := other_instance():
+        # --toggle semantics: an open overlay closes on the second press
+        os.kill(pid, signal.SIGTERM)
+        return 0
+
+    # In-app only: no Polycarbon window focused -> nothing to overlay.
+    app_win = focused_polycarbon_app()
+    if app_win is None:
+        return 0
+
+    # Wayland app_id — what the Hyprland window rules (rules.lua) match:
+    # float + pin. Position is glued to the app window by follow_app.
+    GLib.set_prgname(APP_ID)
+
+    os.makedirs(BASE, exist_ok=True)
+    with open(PIDFILE, "w", encoding="ascii") as f:
+        f.write(str(os.getpid()))
+    signal.signal(signal.SIGTERM, lambda *_: Gtk.main_quit())
+
+    style = Gtk.CssProvider()
+    style.load_from_data(CSS)
+    Gtk.StyleContext.add_provider_for_screen(
+        Gdk.Screen.get_default(), style,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    win = Overlay(app_win)
+    win.show_all()
+    Gtk.main()
+    try:
+        os.unlink(PIDFILE)
+    except OSError:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

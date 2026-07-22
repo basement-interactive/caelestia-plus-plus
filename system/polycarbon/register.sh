@@ -46,3 +46,4 @@ command -v update-desktop-database >/dev/null && update-desktop-database "$APPS_
 # Console entry point: `polycarbon config` (and `polycarbon foo.exe`)
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$SHELLDIR/system/polycarbon/polycarbon" "$HOME/.local/bin/polycarbon"
+ln -sfn "$SHELLDIR/system/polycarbon/polyscrubber" "$HOME/.local/bin/polyscrubber"
