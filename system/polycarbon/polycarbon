@@ -301,14 +301,18 @@ runner_install_tag() {
     local base_url="https://github.com/$RUNNER_REPO/releases/download/$tag"
     say "downloading runtime $tag (~95 MB)..."
     curl -fsSL --retry 3 -o "$BASE/runner.tar.xz" "$base_url/$asset" || die "Runtime download failed" "Check your connection and try again"
+    # Verification is mandatory: a download that can't be checked against the
+    # release's published sums is never installed.
     local want
-    want=$(curl -fsSL --max-time 15 "$base_url/sha256sums.txt" 2>/dev/null | awk -v a="$asset" '$2 == a || $2 == "./"a {print $1}')
-    if [ -n "$want" ]; then
-        echo "$want  $BASE/runner.tar.xz" | sha256sum -c --quiet - || {
-            rm -f "$BASE/runner.tar.xz"
-            die "Runtime download corrupted" "Checksum mismatch — try again"
-        }
-    fi
+    want=$(curl -fsSL --retry 3 --max-time 30 "$base_url/sha256sums.txt" 2>/dev/null | awk -v a="$asset" '$2 == a || $2 == "./"a {print $1}')
+    printf '%s' "$want" | grep -qE '^[0-9a-f]{64}$' || {
+        rm -f "$BASE/runner.tar.xz"
+        die "Runtime not verified" "Couldn't fetch the release checksums — try again once online"
+    }
+    echo "$want  $BASE/runner.tar.xz" | sha256sum -c --quiet - || {
+        rm -f "$BASE/runner.tar.xz"
+        die "Runtime download corrupted" "Checksum mismatch — try again"
+    }
     rm -rf "$RUNNER_DIR.new"
     mkdir -p "$RUNNER_DIR.new"
     tar -xJf "$BASE/runner.tar.xz" --strip-components=1 -C "$RUNNER_DIR.new" || die "Runtime unpack failed" "See $LOG"
@@ -446,7 +450,9 @@ link_dir() {
     mkdir -p "$real"
     if [ -d "$win" ]; then
         find "$win" -mindepth 1 -maxdepth 1 -exec mv -n {} "$real/" \; 2>/dev/null
-        rmdir "$win" 2>/dev/null || rm -rf "$win"
+        # mv -n leaves name collisions behind; deleting them would be data
+        # loss, so keep the folder as a real dir and retry the link next run
+        rmdir "$win" 2>/dev/null || return 0
     fi
     ln -sfn "$real" "$win"
 }
@@ -567,21 +573,27 @@ ensure_ready() {
 # (comm, truncated to 15 chars), so an exact-comm kill hits only this program's
 # own processes — never polycarbon itself or other apps in the prefix.
 kill_stale() { # exe-basename
-    local comm; comm=$(printf '%s' "$1" | cut -c1-15)
-    pgrep -x "$comm" >/dev/null 2>&1 || return 0
+    local re; re=$(_comm_re "$1")
+    pgrep -x "$re" >/dev/null 2>&1 || return 0
     # A LIVE session is not stale. Wine maps app windows with class = the exe
     # basename, so if this exe has a window up right now the user is simply
     # running it — launching it again (double-click, .lnk, file handoff) must
     # not shoot the session. Only windowless leftovers are zombies.
-    if command -v hyprctl >/dev/null 2>&1 \
-        && hyprctl clients -j 2>/dev/null | grep -iq "\"class\": *\"$1\""; then
+    local clients
+    if ! clients=$(hyprctl clients -j 2>/dev/null); then
+        # Can't ask the compositor whether a window is up, so can't prove the
+        # session is dead. A leftover zombie beats shooting a live app.
+        logmsg "$1 is running but window state is unknown — leaving it alone"
+        return 0
+    fi
+    if printf '%s' "$clients" | grep -iqF "\"class\": \"$1\""; then
         logmsg "$1 already has a window open — not touching the running session"
         return 0
     fi
     logmsg "clearing stale instances of $1"
-    pkill -x "$comm" 2>/dev/null
+    pkill -x "$re" 2>/dev/null
     sleep 1
-    pkill -9 -x "$comm" 2>/dev/null
+    pkill -9 -x "$re" 2>/dev/null
 }
 
 # Wine persists every audio endpoint it ever saw into the prefix registry
@@ -622,10 +634,21 @@ _new_window_since() { # $1 = window addresses captured before launch
     [ -n "$(comm -13 <(printf '%s\n' "$1") <(_win_addrs) 2>/dev/null)" ]
 }
 
+# pgrep/pkill -x match an ERE, and exe names are full of regex metachars
+# ("App (x64).exe", "a+b.exe") — escape them, then truncate to comm's 15
+# chars so the match is literal-exact.
+_comm_re() { printf '%s' "$1" | cut -c1-15 | sed 's/[].*^$()+?{|[\\]/\\&/g'; }
+
+# Is the launched program itself still running? Reads $exe from the caller —
+# same dynamic scope as run_with_watchdog.
+_app_alive() { pgrep -x "$(_comm_re "$exe")" >/dev/null 2>&1; }
+
 _prefix_busy() { pgrep -f "$RUNNER_DIR/bin/wine" >/dev/null 2>&1; }
 
 is_installer() {
-    case "${1,,}" in
+    # Judge the FILE, not its path — /home/x/Installers/app.exe is not an installer
+    local n; n=$(basename "$1")
+    case "${n,,}" in
     *.msi) return 0 ;;
     *setup*|*install*|*_inst.exe|*inst.exe) return 0 ;;
     esac
@@ -639,6 +662,12 @@ run_with_watchdog() {
     local before; before=$(_win_addrs)
     ( eval "$learned"; eval "$extra"; run_target "$target" "${appargs[@]}" ) &
     local launcher=$! t=0
+    # No live compositor to ask about windows -> hang detection is blind:
+    # every app would look windowless and be shot at the grace deadline.
+    # Blocking is the only honest option then.
+    if ! hyprctl clients -j >/dev/null 2>&1; then
+        wait "$launcher"; return $?
+    fi
     while :; do
         if _new_window_since "$before"; then
             wait "$launcher" 2>/dev/null      # window up: real session, block till closed
@@ -663,7 +692,9 @@ run_with_watchdog() {
         fi
         if [ "$t" -ge "$WATCHDOG_GRACE" ]; then
             logmsg "$exe never opened a window in ${WATCHDOG_GRACE}s and is still running — treating as hung"
-            "$RUNNER_DIR/bin/wineserver" -k >/dev/null 2>&1
+            # Kill THIS program only — wineserver -k would take every other
+            # app running on the shared prefix down with it
+            pkill -9 -x "$(_comm_re "$exe")" 2>/dev/null
             wait "$launcher" 2>/dev/null
             return 124
         fi
@@ -712,6 +743,12 @@ winpath() {
 # (?a=1&b=2) then reach the program intact instead of the shell splitting on &.
 dispatch_url() {
     local uri=$1 scheme=${1%%://*} cmd root
+    # The scheme comes from an untrusted browser link and lands in a registry
+    # path — accept RFC 3986 scheme chars only, nothing that can traverse keys
+    printf '%s' "$scheme" | grep -qE '^[a-zA-Z][a-zA-Z0-9+.-]*$' || {
+        notify "Link not handled" "Malformed link scheme"
+        return 1
+    }
     for root in 'HKEY_CURRENT_USER\Software\Classes' 'HKEY_LOCAL_MACHINE\Software\Classes' 'HKEY_CLASSES_ROOT'; do
         cmd=$("$WINE" reg query "$root\\$scheme\\shell\\open\\command" /ve 2>/dev/null | sed -n 's/.*REG_SZ[[:space:]]*//p' | tr -d '\r')
         [ -n "$cmd" ] && break
@@ -734,6 +771,10 @@ if cur: toks.append(cur)
 # a bare %1 token becomes the whole URI; embedded %1 (rare) is substituted
 sys.stdout.write("\0".join((uri if t == "%1" else t.replace("%1", uri)) for t in toks))
 ' "$cmd" "$uri")
+    [ "${#argv[@]}" -ge 1 ] || {
+        notify "Link not handled" "The registered handler command is empty or unparseable"
+        return 1
+    }
 
     # Launch from the handler program's OWN directory. This is what makes the
     # app's single-instance handoff work: a portable app (Vortex, Telegram…)
@@ -778,7 +819,7 @@ _list_shortcuts() {
 # the shortcut listing captured before the run; only genuinely new entries
 # are registered, and icons extracted by Wine's own menu builder are reused.
 harvest_shortcuts() {
-    local before=$1 lnk name slug dest icon
+    local before=$1 lnk name slug dest icon lnk_q
     mkdir -p "$APPS_DIR"
     while IFS= read -r lnk; do
         [ -n "$lnk" ] || continue
@@ -790,12 +831,17 @@ harvest_shortcuts() {
         [ -n "$slug" ] || continue
         dest="$APPS_DIR/polycarbon-$slug.desktop"
         icon=$(_find_wine_icon "$name")
+        # The .lnk name is installer-controlled and lands in a .desktop file:
+        # escape the Exec-quoted path per the spec (\ " ` $) so a hostile
+        # name can't smuggle its own Exec, and keep Name to one printable line
+        lnk_q=$(printf '%s' "$lnk" | sed 's/[\\"`$]/\\&/g')
+        name=$(printf '%s' "$name" | tr -d '[:cntrl:]')
         cat > "$dest" <<EOF
 [Desktop Entry]
 Type=Application
 Name=$name
 Comment=Windows program via Polycarbon
-Exec="$SELF" "$lnk"
+Exec="$SELF" "$lnk_q"
 Icon=${icon:-application-x-executable}
 Terminal=false
 Categories=Utility;
@@ -817,7 +863,7 @@ EOF
 _find_wine_icon() {
     local name=$1 winedir="${XDG_DATA_HOME:-$HOME/.local/share}/applications/wine"
     [ -d "$winedir" ] || return 0
-    grep -rlxF "Name=$name" "$winedir" 2>/dev/null | head -1 | xargs -r grep -m1 '^Icon=' | cut -d= -f2-
+    grep -rlxF "Name=$name" "$winedir" 2>/dev/null | head -1 | xargs -r -d '\n' grep -m1 '^Icon=' | cut -d= -f2-
 }
 
 # URL protocols Windows programs register (vortex://, nxm://, …) live only in
@@ -1054,7 +1100,8 @@ diagnose_failure() {
         export WINEDEBUG="err+all,fixme+all"
         timeout "$WATCHDOG_GRACE" "$WINE" "$target" "${appargs[@]}"
     ) >"$dlog" 2>&1
-    "$RUNNER_DIR/bin/wineserver" -k 2>/dev/null
+    # Clear only this program's leftovers — other apps may be live on the prefix
+    pkill -9 -x "$(_comm_re "$exe")" 2>/dev/null
 
     # Real failure signals: unhandled exceptions + their backtrace, module/load
     # errors, wine diagnostics, assertions. (Plain err: lines, not fixme noise.)
