@@ -932,7 +932,7 @@ _list_shortcuts() {
 # the shortcut listing captured before the run; only genuinely new entries
 # are registered, and icons extracted by Wine's own menu builder are reused.
 harvest_shortcuts() {
-    local before=$1 lnk name slug dest icon lnk_q
+    local before=$1 lnk name slug dest icon lnk_q added=""
     mkdir -p "$APPS_DIR"
     while IFS= read -r lnk; do
         [ -n "$lnk" ] || continue
@@ -943,6 +943,11 @@ harvest_shortcuts() {
         slug=$(printf '%s' "$name" | tr -cs '[:alnum:]' '-' | tr '[:upper:]' '[:lower:]' | sed 's/^-//;s/-$//')
         [ -n "$slug" ] || continue
         dest="$APPS_DIR/polycarbon-$slug.desktop"
+        # Only announce a launcher the first time it appears. harvest runs
+        # repeatedly (a live watcher during the run, then once at the end),
+        # so re-creating an existing entry must stay silent — otherwise the
+        # watcher spams "installed" every poll for the same shortcut.
+        local fresh=""; [ -e "$dest" ] || fresh=1
         icon=$(_find_wine_icon "$name")
         # The .lnk name is installer-controlled and lands in a .desktop file:
         # escape the Exec-quoted path per the spec (\ " ` $) so a hostile
@@ -960,14 +965,49 @@ Terminal=false
 Categories=Utility;
 X-Polycarbon=true
 EOF
-        notify "$name installed" "Added to your app menu" checkmark
+        if [ -n "$fresh" ]; then
+            notify "$name installed" "Added to your app menu" checkmark
+            added=1
+        fi
     done < <(_list_shortcuts)
-    # The runtime's own menu builder writes runner-branded duplicates under
-    # applications/wine/. Its extracted ICONS live separately in the icon
-    # theme and stay usable; the branded entries themselves are removed so
-    # only Polycarbon's launchers ever appear in the app menu.
+    # Only rebuild the desktop database when something actually changed —
+    # the live watcher would otherwise re-run it on every idle poll.
+    [ -n "$added" ] && command -v update-desktop-database >/dev/null \
+        && update-desktop-database "$APPS_DIR" 2>/dev/null || true
+}
+
+# The runtime's own menu builder writes runner-branded duplicates under
+# applications/wine/, and it extracts each shortcut's real icon there —
+# which _find_wine_icon reuses. So the branded entries are cleared only
+# ONCE, at the end of a run: doing it inside harvest_shortcuts would let
+# the live watcher's first poll delete the icons a still-running installer
+# hasn't finished referencing. The extracted icons live in the icon theme
+# and survive; only the duplicate launchers go.
+clear_runner_menu_entries() {
     rm -rf "$APPS_DIR/wine"
     command -v update-desktop-database >/dev/null && update-desktop-database "$APPS_DIR" 2>/dev/null || true
+}
+
+# Watch for installer-created shortcuts WHILE the program runs, so a setup
+# wizard's new Start-Menu/Desktop entries reach the app menu the moment
+# they're written — not only after the app finally exits. A setup that
+# installs then launches the app (or just stays resident) never triggers
+# the after-run harvest on its own; this closes that gap. Runs detached,
+# polls against the same pre-run snapshot, and is stopped at the end of the
+# launch. Echoes its PID so the caller can kill it.
+watch_shortcuts() {
+    local before=$1
+    (
+        # Give an installer time to reach its "create shortcuts" step, then
+        # keep checking — most installs finish inside a couple of minutes.
+        local i=0
+        while [ "$i" -lt 60 ]; do
+            sleep 3
+            harvest_shortcuts "$before"
+            i=$((i + 1))
+        done
+    ) >/dev/null 2>&1 &
+    echo $!
 }
 
 # Wine's winemenubuilder extracts each shortcut's real icon and writes its own
@@ -1090,6 +1130,12 @@ Full log: $LOG" dialog-error
     # Snapshot existing shortcuts so an installer's new ones can be spotted
     local before="$BASE/.shortcuts.pre"
     _list_shortcuts > "$before"
+    # Harvest new shortcuts live during the run, so a setup wizard's entries
+    # reach the app menu the moment it writes them (not only after it exits).
+    # A trap kills it on ANY exit path (including die) so it never outlives
+    # the launch as an orphan poller.
+    local shortcut_watcher; shortcut_watcher=$(watch_shortcuts "$before")
+    trap 'kill "$shortcut_watcher" 2>/dev/null' EXIT
 
     # Marker so we can later tell which log/dump files THIS run produced
     local marker="$BASE/.launch-marker"
@@ -1191,9 +1237,12 @@ Full log: $LOG" dialog-error
 Tried: ${tried[*]:-none}. Full details: $LOG" dialog-error
     fi
 
-    # Everything on the prefix has already been waited out; register any
-    # shortcuts and protocols the run left behind
+    # Stop the live shortcut watcher; do the final authoritative harvest
+    # (catches anything created in the last few seconds before exit), then
+    # clear the runner's own branded menu duplicates once.
+    kill "$shortcut_watcher" 2>/dev/null
     harvest_shortcuts "$before"
+    clear_runner_menu_entries
     harvest_schemes
     exit "$code"
 }
