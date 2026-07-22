@@ -47,3 +47,17 @@ command -v update-desktop-database >/dev/null && update-desktop-database "$APPS_
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$SHELLDIR/system/polycarbon/polycarbon" "$HOME/.local/bin/polycarbon"
 ln -sfn "$SHELLDIR/system/polycarbon/polyscrubber" "$HOME/.local/bin/polyscrubber"
+
+# Polyscrubber overlay: Super+F5 toggle + its float/pin window rule. The
+# scripts alone do nothing without a keybind — a fresh checkout has never
+# had one, so we install it here (idempotent, every startup). `hyprctl
+# keyword` reaches a running Hyprland with a standard .conf config; a
+# Lua-config fork rejects it ("non-legacy parser") and keeps its binds in
+# the Lua files instead, so a failure here is silently fine.
+if command -v hyprctl >/dev/null 2>&1 && hyprctl clients -j >/dev/null 2>&1; then
+    # Drop any older Insert binding for the overlay before adding the new one
+    hyprctl keyword unbind "Insert" >/dev/null 2>&1 || true
+    hyprctl keyword bind "SUPER,F5,exec,$HOME/.local/bin/polyscrubber" >/dev/null 2>&1 || true
+    hyprctl keyword windowrule "float,class:^(polyscrubber)$" >/dev/null 2>&1 || true
+    hyprctl keyword windowrule "pin,class:^(polyscrubber)$" >/dev/null 2>&1 || true
+fi

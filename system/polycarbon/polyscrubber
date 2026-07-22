@@ -2,7 +2,7 @@
 """Polyscrubber — the Polycarbon in-app overlay.
 
 Part of Polycarbon, not the desktop: it only ever appears inside a
-Polycarbon (Wine) window. Insert toggles it; if the focused window isn't
+Polycarbon (Wine) window. Super+F5 toggles it; if the focused window isn't
 a Polycarbon app, nothing opens. Once open it docks to the app window's
 top-left corner and follows it — moves with the app, dies with the app —
 so it reads as the app's own overlay, ImGui-style: the compact dark
@@ -172,7 +172,7 @@ class Overlay(Gtk.Window):
         self.body.pack_start(self.app_section(), False, False, 0)
         self.body.pack_start(self.actions_section(), False, False, 0)
 
-        hint = Gtk.Label(label="Insert / Esc to close", xalign=0)
+        hint = Gtk.Label(label="Super+F5 / Esc to close", xalign=0)
         hint.get_style_context().add_class("hint")
         self.body.pack_start(hint, False, False, 0)
 
@@ -315,7 +315,7 @@ class Overlay(Gtk.Window):
         self.resize(self.my_size[0] or 300, 1)
 
     def on_key(self, _w, event):
-        if event.keyval in (Gdk.KEY_Escape, Gdk.KEY_Insert):
+        if event.keyval in (Gdk.KEY_Escape, Gdk.KEY_F5):
             self.destroy()
 
     def on_debugger(self, _b):
