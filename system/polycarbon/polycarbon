@@ -1024,6 +1024,50 @@ _list_shortcuts() {
     done | sort -u
 }
 
+# This runtime's winemenubuilder (Proton-style) writes its extracted shortcut
+# icons here, one PNG per size, named to match the Icon= key in the .desktop
+# files it drops alongside. They live INSIDE the prefix, so nothing on the
+# host can see them until we copy them into the XDG icon theme.
+_proton_shortcuts_dir() { printf '%s' "$WINEPREFIX/drive_c/proton_shortcuts"; }
+
+# Copy the runtime's extracted shortcut icons into the user's hicolor theme so
+# a harvested launcher's "Icon=<name>" actually resolves to the real icon
+# instead of a generic glyph. Idempotent (cp -u), best-effort cache refresh.
+_install_shortcut_icons() {
+    local src; src="$(_proton_shortcuts_dir)/icons"
+    [ -d "$src" ] || return 0
+    local theme="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
+    local sz
+    for sz in "$src"/*/; do
+        [ -d "${sz}apps" ] || continue
+        local dim; dim=$(basename "$sz")
+        mkdir -p "$theme/$dim/apps"
+        cp -u "${sz}apps/"*.png "$theme/$dim/apps/" 2>/dev/null || true
+    done
+    command -v gtk-update-icon-cache >/dev/null 2>&1 \
+        && gtk-update-icon-cache -q -t -f "$theme" 2>/dev/null || true
+}
+
+# winemenubuilder converts shortcuts asynchronously — an installer that exits
+# fast can return before its .lnk/.desktop files are flushed, so the harvest
+# would miss them. Wait (bounded) until the shortcut set stops changing before
+# the final harvest. Cheap: hashes the mtimes of the shortcut roots + the
+# proton_shortcuts dir; returns once two consecutive checks match or time runs
+# out. Only worth doing on the installer path (the watchdog path already blocks
+# until the window closes, long after shortcuts settle).
+_settle_shortcuts() {
+    local sig="" prev="" tries=0
+    while [ "$tries" -lt 10 ]; do   # up to ~5s
+        sig=$( { _shortcut_roots; _proton_shortcuts_dir; } | while IFS= read -r r; do
+            [ -e "$r" ] && find -L "$r" -printf '%T@ %p\n' 2>/dev/null
+        done | sort | md5sum)
+        [ -n "$prev" ] && [ "$sig" = "$prev" ] && return 0
+        prev=$sig
+        sleep 0.5
+        tries=$((tries + 1))
+    done
+}
+
 # Turn every Start Menu / Desktop shortcut an installer just created into a
 # real Linux launcher that runs through Polycarbon, so installed Windows
 # programs land in the app menu exactly like they do on Windows. Called with
@@ -1032,6 +1076,9 @@ _list_shortcuts() {
 harvest_shortcuts() {
     local before=$1 lnk name slug dest icon lnk_q added=""
     mkdir -p "$APPS_DIR"
+    # Get the runtime's extracted icons into the theme first, so the Icon= name
+    # each launcher references below actually resolves to a real icon.
+    _install_shortcut_icons
     while IFS= read -r lnk; do
         [ -n "$lnk" ] || continue
         grep -qxF "$lnk" "$before" 2>/dev/null && continue
@@ -1119,13 +1166,23 @@ watch_shortcuts() {
     echo $!
 }
 
-# Wine's winemenubuilder extracts each shortcut's real icon and writes its own
-# launcher under applications/wine/; steal that Icon line so our menu entry
-# looks right instead of falling back to a generic glyph
+# The icon name to put in a harvested launcher, taken from the runtime's own
+# menu-builder output so it matches an icon _install_shortcut_icons copied into
+# the theme. This runtime writes proton_shortcuts/<Name>.desktop with an Icon=
+# line; read that. Falls back to a vanilla-wine runtime's applications/wine/
+# entries. Empty if neither is present (harvest then uses the generic glyph).
 _find_wine_icon() {
-    local name=$1 winedir="${XDG_DATA_HOME:-$HOME/.local/share}/applications/wine"
-    [ -d "$winedir" ] || return 0
-    grep -rlxF "Name=$name" "$winedir" 2>/dev/null | head -1 | xargs -r -d '\n' grep -m1 '^Icon=' | cut -d= -f2-
+    local name=$1 icon=""
+    local pdir; pdir="$(_proton_shortcuts_dir)"
+    if [ -f "$pdir/$name.desktop" ]; then
+        icon=$(grep -m1 '^Icon=' "$pdir/$name.desktop" 2>/dev/null | cut -d= -f2-)
+    fi
+    if [ -z "$icon" ]; then
+        local winedir="${XDG_DATA_HOME:-$HOME/.local/share}/applications/wine"
+        [ -d "$winedir" ] && icon=$(grep -rlxF "Name=$name" "$winedir" 2>/dev/null \
+            | head -1 | xargs -r -d '\n' grep -m1 '^Icon=' 2>/dev/null | cut -d= -f2-)
+    fi
+    printf '%s' "$icon"
 }
 
 # URL protocols Windows programs register (vortex://, nxm://, …) live only in
@@ -1322,6 +1379,10 @@ Full log: $LOG" dialog-error
             ( eval "$learned"; eval "$extra"; run_target "$target" "${appargs[@]}" )
             code=$?
             "$RUNNER_DIR/bin/wineserver" -w 2>/dev/null
+            # winemenubuilder writes the shortcuts asynchronously — let them
+            # settle before the post-loop harvest so a fast installer's entries
+            # aren't missed.
+            _settle_shortcuts
         else
             run_with_watchdog "$learned" "$extra"
             code=$?
