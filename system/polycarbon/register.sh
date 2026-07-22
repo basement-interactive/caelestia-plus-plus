@@ -46,41 +46,13 @@ command -v update-desktop-database >/dev/null && update-desktop-database "$APPS_
 # Console entry point: `polycarbon config` (and `polycarbon foo.exe`)
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$SHELLDIR/system/polycarbon/polycarbon" "$HOME/.local/bin/polycarbon"
-ln -sfn "$SHELLDIR/system/polycarbon/polyscrubber" "$HOME/.local/bin/polyscrubber"
-
-# Polyscrubber overlay: Super+F5 toggle + its float/pin window rule. The
-# scripts alone do nothing without a keybind, and a fresh checkout has
-# never shipped one — so we install it live here on every startup
-# (register.sh reruns each time the shell launches, so a session-scoped
-# bind is effectively permanent).
-#
-# Modern Hyprland runs a Lua config parser, which REJECTS `hyprctl keyword`
-# ("non-legacy parsers. Use eval."). On those, binds/rules are applied by
-# feeding Lua to `hyprctl dispatch`, which eval's its argument — hl.bind's
-# side effect registers the bind even though the dispatch wrapper then
-# errors (harmless, silenced). A legacy .conf parser takes `keyword`
-# normally. We detect which and use the right one.
-install_overlay_bind() {
-    command -v hyprctl >/dev/null 2>&1 || return 0
-    hyprctl clients -j >/dev/null 2>&1 || return 0   # no running Hyprland
-    local ps="$HOME/.local/bin/polyscrubber"
-    if hyprctl keyword general:border_size 2>&1 | grep -q "non-legacy"; then
-        # Lua parser: eval hl.* directly (dispatch wrapper error is expected)
-        hyprctl dispatch "hl.bind('SUPER + F5', hl.dsp.exec_cmd('$ps'))" >/dev/null 2>&1
-        hyprctl dispatch "hl.window_rule({ match = { class = '^(polyscrubber)\$' }, float = true, pin = true })" >/dev/null 2>&1
-    else
-        # Legacy .conf parser
-        hyprctl keyword bind "SUPER,F5,exec,$ps" >/dev/null 2>&1
-        hyprctl keyword windowrule "float,class:^(polyscrubber)$" >/dev/null 2>&1
-        hyprctl keyword windowrule "pin,class:^(polyscrubber)$" >/dev/null 2>&1
-    fi
-}
-install_overlay_bind
+# Drop the removed polyscrubber overlay's leftovers from older checkouts
+rm -f "$HOME/.local/bin/polyscrubber"
 
 # Put ~/.local/bin on PATH for the LOGIN shell (from getent, not $SHELL —
 # $SHELL reflects whatever spawned this script, not the user's real login
-# shell). The sandrunner/polycarbon/polyscrubber commands all live there;
-# the system scan otherwise tells the user to edit their profile by hand.
+# shell). The polycarbon/sandrunner commands live there; the system scan
+# otherwise tells the user to edit their profile by hand.
 # Idempotent: a marker line means we never append twice, and if the dir is
 # already reachable (some other profile added it) nothing is written.
 ensure_local_bin_path() {
