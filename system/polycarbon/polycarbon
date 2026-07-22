@@ -584,6 +584,25 @@ kill_stale() { # exe-basename
     pkill -9 -x "$comm" 2>/dev/null
 }
 
+# Wine persists every audio endpoint it ever saw into the prefix registry
+# (HKLM\...\MMDevices\Audio). On hosts where endpoints come and go — display
+# audio sinks that follow monitors, per-PID virtual sinks from capture apps —
+# that cache fills with entries whose device no longer exists, and programs
+# that enumerate audio devices at startup (Telegram/WebRTC and friends) hit a
+# stack-buffer overrun (__fastfail c0000409, no window) on the stale data.
+# Proven by bisect both ways: poisoned prefix minus this tree launches clean,
+# clean prefix plus this tree crashes. Dropping the tree is safe — Wine
+# rebuilds it from the LIVE device set the moment the app initialises audio;
+# the only cost is that a non-default output picked inside an app doesn't
+# stick across launches. Skipped while other prefix apps run — clearing
+# devices under a live session is worse than a stale cache, and the running
+# app proves the current cache is harmless anyway.
+clear_audio_endpoint_cache() {
+    _prefix_busy && return 0
+    "$WINE" reg delete 'HKLM\Software\Microsoft\Windows\CurrentVersion\MMDevices\Audio' /f >/dev/null 2>&1
+    return 0
+}
+
 # A GUI program that neither opens a window nor exits is HUNG (a graphics
 # deadlock on a multi-GPU box does exactly this) — recovery can only help if
 # we stop waiting on it. run_with_watchdog launches the program and watches
@@ -889,6 +908,7 @@ Full log: $LOG" dialog-error
     # forever (the exact reason a runtime got stuck and needed a manual update).
     kill_stale "$(basename "$target")"
     ensure_ready
+    clear_audio_endpoint_cache
 
     # Bridge protocols the program registered on a previous run/install BEFORE
     # launching it — a long-lived app (Vortex, Telegram…) never "exits" to
