@@ -224,8 +224,12 @@ PERMS_DIR="$BASE/perms"
 
 # One permission file per program, shared across the forms it launches in:
 # Telegram.lnk, telegram.exe and Telegram.exe all key to "telegram".
+# Permission key for a target. A .lnk and the exe it points at must resolve
+# to the SAME key, or the sandbox/first-run prompt would apply to a launch
+# from a harvested launcher but not to running the exe directly (and vice
+# versa). resolve_exe collapses a .lnk to its target exe basename first.
 perm_key() { # path
-    local n; n=$(basename "$1"); n=${n%.*}
+    local n; n=$(basename "$(resolve_exe "$1")"); n=${n%.*}
     printf '%s' "${n,,}"
 }
 
@@ -460,7 +464,8 @@ runner_install_tag() {
     }
     rm -rf "$RUNNER_DIR.new"
     mkdir -p "$RUNNER_DIR.new"
-    tar -xJf "$BASE/runner.tar.xz" --strip-components=1 -C "$RUNNER_DIR.new" || die "Runtime unpack failed" "See $LOG"
+    tar -xJf "$BASE/runner.tar.xz" --strip-components=1 -C "$RUNNER_DIR.new" \
+        || { rm -f "$BASE/runner.tar.xz"; die "Runtime unpack failed" "See $LOG"; }
     rm -rf "$RUNNER_DIR"
     mv "$RUNNER_DIR.new" "$RUNNER_DIR"
     echo "$tag" > "$BASE/runner.version"
@@ -741,23 +746,40 @@ resolve_exe() { # target-path -> process/exe basename
 # socket (exit 9) instead of starting. Wine names each process after its exe
 # (comm, truncated to 15 chars), so an exact-comm kill hits only this program's
 # own processes — never polycarbon itself or other apps in the prefix.
-kill_stale() { # exe-basename
-    local re; re=$(_comm_re "$1")
+kill_stale() { # exe-basename [mode]
+    # mode=recovery: this run's own just-failed attempt — kill unconditionally.
+    # mode empty (initial, pre-launch): the process is from a PRIOR run and may
+    # be a live tray-minimized app with no window — be conservative.
+    local re; re=$(_comm_re "$1") mode=${2:-}
     pgrep -x "$re" >/dev/null 2>&1 || return 0
     # A LIVE session is not stale. Wine maps app windows with class = the exe
     # basename, so if this exe has a window up right now the user is simply
     # running it — launching it again (double-click, .lnk, file handoff) must
     # not shoot the session. Only windowless leftovers are zombies.
-    local clients
-    if ! clients=$(hyprctl clients -j 2>/dev/null); then
-        # Can't ask the compositor whether a window is up, so can't prove the
-        # session is dead. A leftover zombie beats shooting a live app.
-        logmsg "$1 is running but window state is unknown — leaving it alone"
-        return 0
-    fi
-    if printf '%s' "$clients" | grep -iqF "\"class\": \"$1\""; then
-        logmsg "$1 already has a window open — not touching the running session"
-        return 0
+    if [ "$mode" != recovery ]; then
+        local clients
+        if ! clients=$(hyprctl clients -j 2>/dev/null); then
+            # Can't ask the compositor whether a window is up, so can't prove the
+            # session is dead. A leftover zombie beats shooting a live app.
+            logmsg "$1 is running but window state is unknown — leaving it alone"
+            return 0
+        fi
+        if printf '%s' "$clients" | grep -iqF "\"class\": \"$1\""; then
+            logmsg "$1 already has a window open — not touching the running session"
+            return 0
+        fi
+        # No window, but a long-lived process is a running session (a tray-
+        # minimized app — Telegram/Discord live in the tray with no window),
+        # not a fresh crash zombie. Killing it would shoot that live session.
+        # Only clear a windowless process that has been up briefly (a genuine
+        # leftover from a crash keeps wineserver alive but doesn't persist for
+        # minutes). Threshold: 90s of elapsed time.
+        local youngest; youngest=$(pgrep -x "$re" 2>/dev/null | while read -r p; do
+            ps -o etimes= -p "$p" 2>/dev/null; done | sort -n | head -1 | tr -d ' ')
+        if [ -n "$youngest" ] && [ "$youngest" -gt 90 ]; then
+            logmsg "$1 has run windowless for ${youngest}s — treating as a live tray session, not clearing"
+            return 0
+        fi
     fi
     logmsg "clearing stale instances of $1"
     pkill -x "$re" 2>/dev/null
@@ -1289,8 +1311,9 @@ Full log: $LOG" dialog-error
         : > "$marker"
         # Each recovery attempt starts from a clean slate: the previous
         # attempt's process is cleared so a single-instance app doesn't abort
-        # on a still-contended lock when it relaunches.
-        [ -n "$step" ] && kill_stale "$exe"
+        # on a still-contended lock when it relaunches. This IS this run's own
+        # failed attempt, so clear it unconditionally (recovery mode).
+        [ -n "$step" ] && kill_stale "$exe" recovery
         rung_start=$(wc -l <"$LOG" 2>/dev/null || echo 0)
         started=$SECONDS
         # Installers run windowless and exit on their own — block on them.
@@ -1371,7 +1394,7 @@ Tried: ${tried[*]:-none}. Full details: $LOG" dialog-error
 # $appargs/$learned from the caller (bash dynamic scope).
 diagnose_failure() {
     logmsg "no fix worked — running one diagnostic pass with full logging to capture the cause"
-    kill_stale "$exe"
+    kill_stale "$exe" recovery
     local dlog="$BASE/diagnostic.log" dir
     dir=$(dirname "$target")
     : > "$dlog"
