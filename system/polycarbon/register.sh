@@ -42,3 +42,7 @@ done
 
 rm -f "$APPS_DIR/$LEGACY_ID"
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPS_DIR" || true
+
+# Console entry point: `polycarbon config` (and `polycarbon foo.exe`)
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$SHELLDIR/system/polycarbon/polycarbon" "$HOME/.local/bin/polycarbon"

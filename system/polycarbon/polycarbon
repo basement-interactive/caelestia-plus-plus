@@ -214,6 +214,116 @@ vulkan_ok() {
     ls /usr/share/vulkan/icd.d/*.json >/dev/null 2>&1
 }
 
+# --- Per-app permissions ---------------------------------------------------
+# Every app gets a permission file on its first launch (the user is asked how
+# much access it should have); `polycarbon config` opens a GUI over the same
+# files. ROOT=on means what Wine apps always had: unrestricted access as your
+# user. Anything else is enforced with a real bubblewrap sandbox around the
+# Wine invocation, plus optional systemd resource caps.
+PERMS_DIR="$BASE/perms"
+
+# One permission file per program, shared across the forms it launches in:
+# Telegram.lnk, telegram.exe and Telegram.exe all key to "telegram".
+perm_key() { # path
+    local n; n=$(basename "$1"); n=${n%.*}
+    printf '%s' "${n,,}"
+}
+
+perm_get() { # file key default
+    local v
+    v=$(sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -1)
+    printf '%s' "${v:-$3}"
+}
+
+write_perms() { # key root files net
+    mkdir -p "$PERMS_DIR"
+    cat > "$PERMS_DIR/$1.perm" <<EOF
+# Polycarbon permissions for $1 — edit by hand or run: polycarbon config
+# ROOT on = unrestricted system access; every other key is then ignored
+ROOT=$2
+# FILES what the program may modify: full | home | docs | app
+FILES=$3
+# NET on | off
+NET=$4
+# MEM memory cap, e.g. 2G (empty = unlimited)
+MEM=
+# CPU percent of one core, e.g. 50 (empty = unlimited)
+CPU=
+EOF
+}
+
+# First launch of a program: ask how much access it gets. Falls back to the
+# historical full-access behaviour when there is no display to ask on — but
+# still records that, so the choice shows up in `polycarbon config`.
+ask_first_run() { # target-path
+    local key; key=$(perm_key "$1")
+    [ -f "$PERMS_DIR/$key.perm" ] && return 0
+    local name; name=$(basename "$1")
+    if command -v zenity >/dev/null 2>&1 && [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
+        if zenity --question --title "Polycarbon — first run" \
+            --text "First launch of <b>$name</b>.\n\n<b>Full access</b> — the program can read and change anything your user can (how Windows programs normally run).\n\n<b>Restricted</b> — it runs in a sandbox: your home folder, its own files and the network, nothing else.\n\nChange this any time with: polycarbon config" \
+            --ok-label "Full access" --cancel-label "Restricted" 2>/dev/null; then
+            write_perms "$key" on full on
+            logmsg "first run of $name: user granted full access"
+        else
+            write_perms "$key" off home on
+            logmsg "first run of $name: user chose restricted"
+        fi
+    else
+        write_perms "$key" on full on
+        logmsg "first run of $name: no display to ask on — defaulting to full access"
+    fi
+}
+
+# Build the confinement wrapper for one launch into CONFINE[]. Empty for
+# ROOT=on (and for apps from before permissions existed). The sandbox keeps
+# what Wine cannot live without rw in every profile: the prefix/runner
+# ($BASE), /tmp (X11 + wineserver socket), the runtime dir (wayland/audio
+# sockets), devices, and the program's own folder (portable apps keep their
+# single-instance lock next to the exe). PID/IPC namespaces stay shared —
+# wineserver ptraces the app's processes for exception handling.
+CONFINE=()
+confine_setup() { # target-path
+    CONFINE=()
+    local pf="$PERMS_DIR/$(perm_key "$1").perm" tdir; tdir=$(dirname "$1")
+    [ -f "$pf" ] || return 0
+    [ "$(perm_get "$pf" ROOT on)" = on ] && return 0
+    command -v bwrap >/dev/null 2>&1 || { logmsg "bwrap not installed — running unrestricted"; return 0; }
+
+    # Resource caps ride on a systemd user scope; values are validated here
+    # so a hand-edited file can't splice anything else into the command
+    local mem cpu
+    mem=$(perm_get "$pf" MEM ""); cpu=$(perm_get "$pf" CPU "")
+    printf '%s' "$mem" | grep -qE '^[0-9]+[KMGT]?$' || mem=""
+    printf '%s' "$cpu" | grep -qE '^[0-9]+$' || cpu=""
+    if [ -n "$mem$cpu" ] && command -v systemd-run >/dev/null 2>&1; then
+        CONFINE+=(systemd-run --user --scope --quiet --collect)
+        [ -n "$mem" ] && CONFINE+=(-p "MemoryMax=$mem")
+        [ -n "$cpu" ] && CONFINE+=(-p "CPUQuota=$cpu%")
+        CONFINE+=(--)
+    fi
+
+    CONFINE+=(bwrap --die-with-parent)
+    local files; files=$(perm_get "$pf" FILES full)
+    case $files in
+    full) CONFINE+=(--bind / /) ;;
+    home) CONFINE+=(--ro-bind / / --bind "$HOME" "$HOME") ;;
+    docs)
+        CONFINE+=(--ro-bind / /)
+        local d
+        for d in "${XDG_DOCUMENTS_DIR:-$HOME/Documents}" "${XDG_DOWNLOAD_DIR:-$HOME/Downloads}"; do
+            [ -d "$d" ] && CONFINE+=(--bind "$d" "$d")
+        done
+        ;;
+    *) CONFINE+=(--ro-bind / /) ;;   # app: own files only
+    esac
+    [ -d "$tdir" ] && CONFINE+=(--bind "$tdir" "$tdir")
+    CONFINE+=(--bind "$BASE" "$BASE" --bind /tmp /tmp --dev-bind /dev /dev --proc /proc)
+    [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] && CONFINE+=(--bind "$XDG_RUNTIME_DIR" "$XDG_RUNTIME_DIR")
+    [ "$(perm_get "$pf" NET on)" = off ] && CONFINE+=(--unshare-net)
+    logmsg "sandbox: files=$files net=$(perm_get "$pf" NET on)${mem:+ mem=$mem}${cpu:+ cpu=$cpu%}"
+}
+
 # --- Self-recovery ---------------------------------------------------------
 # When a program crashes on launch, polycarbon walks a ladder of known Wine
 # quirks — each a small environment tweak — restarting the program with one
@@ -706,25 +816,26 @@ run_target() {
     local target=$1
     shift
     cd "$(dirname "$target")" || exit 1
+    # ${CONFINE[@]} is the per-app sandbox (empty = unrestricted, the default)
     case "${target,,}" in
     *.msi)
-        "$WINE" msiexec /i "$target" "$@" >>"$LOG" 2>&1
+        "${CONFINE[@]}" "$WINE" msiexec /i "$target" "$@" >>"$LOG" 2>&1
         ;;
     *.lnk)
-        "$WINE" start /wait /unix "$target" >>"$LOG" 2>&1
+        "${CONFINE[@]}" "$WINE" start /wait /unix "$target" >>"$LOG" 2>&1
         ;;
     *.bat | *.cmd)
-        "$WINE" cmd /c "$(winpath "$target")" "$@" >>"$LOG" 2>&1
+        "${CONFINE[@]}" "$WINE" cmd /c "$(winpath "$target")" "$@" >>"$LOG" 2>&1
         ;;
     *.vbs | *.vbe | *.wsf)
-        "$WINE" wscript "$(winpath "$target")" "$@" >>"$LOG" 2>&1
+        "${CONFINE[@]}" "$WINE" wscript "$(winpath "$target")" "$@" >>"$LOG" 2>&1
         ;;
     *.reg)
         # regedit shows the standard import-confirmation, same as Windows
-        "$WINE" regedit "$(winpath "$target")" >>"$LOG" 2>&1
+        "${CONFINE[@]}" "$WINE" regedit "$(winpath "$target")" >>"$LOG" 2>&1
         ;;
     *)
-        "$WINE" "$target" "$@" >>"$LOG" 2>&1
+        "${CONFINE[@]}" "$WINE" "$target" "$@" >>"$LOG" 2>&1
         ;;
     esac
 }
@@ -787,8 +898,10 @@ sys.stdout.write("\0".join((uri if t == "%1" else t.replace("%1", uri)) for t in
     exe_unix=$("$WINE" winepath -u "${argv[0]}" 2>/dev/null)
     exe_dir=$(dirname "$exe_unix" 2>/dev/null)
     if [ -n "$exe_dir" ] && [ -d "$exe_dir" ]; then
+        # The handler app's saved permissions apply to link launches too
+        confine_setup "$exe_unix"
         logmsg "routing link to $(basename "${argv[0]}") (cwd: ${exe_dir})"
-        ( cd "$exe_dir" && "$WINE" "${argv[@]}" >>"$LOG" 2>&1 )
+        ( cd "$exe_dir" && "${CONFINE[@]}" "$WINE" "${argv[@]}" >>"$LOG" 2>&1 )
     else
         "$WINE" "${argv[@]}" >>"$LOG" 2>&1
     fi
@@ -911,6 +1024,11 @@ EOF
 main() {
     [ $# -ge 1 ] || die "Nothing to run" "polycarbon expects a .exe, .msi or .lnk path"
 
+    # Permission manager GUI: `polycarbon config` in a terminal
+    if [ "$1" = "config" ] || [ "$1" = "--config" ]; then
+        exec python3 "$(dirname "$SELF")/polycarbon-config.py"
+    fi
+
     # System-scan fix path: full setup now, run nothing. Forces the runtime
     # update check so "Set up / Update" in the scan always fetches the latest.
     if [ "$1" = "--setup" ]; then
@@ -948,6 +1066,10 @@ Full log: $LOG" dialog-error
     new_log
     [ -e "$target" ] || die "File not found" "$target"
     logmsg "launching $(basename "$target")"
+    # First launch of this program: ask how much access it should have.
+    # Every launch then builds its confinement from the saved answer.
+    ask_first_run "$target"
+    confine_setup "$target"
     # Clear leftover instances of THIS program up front, before setup runs:
     # stale copies keep wineserver alive, and the runtime auto-updater defers
     # whenever it sees Wine running — so zombies would block the auto-update
