@@ -194,7 +194,8 @@ class Overlay(Gtk.Window):
     def actions_section(self):
         box = self._section("actions")
         inner = box.get_child()
-        for label, cb in (("permissions", self.on_perms),
+        for label, cb in (("debugger", self.on_debugger),
+                          ("permissions", self.on_perms),
                           ("open log", self.on_log),
                           ("kill app", self.on_kill)):
             b = Gtk.Button(label=label)
@@ -316,6 +317,13 @@ class Overlay(Gtk.Window):
     def on_key(self, _w, event):
         if event.keyval in (Gdk.KEY_Escape, Gdk.KEY_Insert):
             self.destroy()
+
+    def on_debugger(self, _b):
+        here = os.path.dirname(os.path.realpath(__file__))
+        subprocess.Popen(
+            [sys.executable, os.path.join(here, "polyscrubber-debugger.py"),
+             str(self.app_win.get("pid")), self.app_win.get("class", "app")])
+        self.destroy()
 
     def on_perms(self, _b):
         subprocess.Popen(

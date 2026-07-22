@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+"""Polyscrubber debug engine — the privileged half of the debugger.
+
+Runs as root (launched via pkexec by the overlay) because reading another
+process's memory under ptrace_scope=1 needs CAP_SYS_PTRACE. It attaches to
+one Polycarbon (Wine) process and speaks a line-delimited JSON protocol on
+stdin/stdout: scan / refine / read / write / freeze / modules / detect.
+
+Memory access is process_vm_readv/writev — the same mechanism scanmem and
+Cheat Engine use — so no execution is stopped and the app keeps running
+while you scan it. Nothing here is Wine-specific: a Wine app is an ordinary
+Linux process and its memory is just /proc/<pid>/mem.
+
+Protocol: one JSON object per line in, one per line out, each carrying an
+"op". Every reply echoes "ok": true/false. The frontend owns all UI; this
+process owns all memory access and holds the match set between scans.
+"""
+import ctypes
+import json
+import os
+import re
+import struct
+import sys
+import threading
+import time
+
+libc = ctypes.CDLL("libc.so.6", use_errno=True)
+
+
+class iovec(ctypes.Structure):
+    _fields_ = [("iov_base", ctypes.c_void_p), ("iov_len", ctypes.c_size_t)]
+
+
+libc.process_vm_readv.restype = ctypes.c_ssize_t
+libc.process_vm_writev.restype = ctypes.c_ssize_t
+
+# value-type -> (struct format, size). "bytes"/"string" handled separately.
+TYPES = {
+    "i8": ("<b", 1), "u8": ("<B", 1),
+    "i16": ("<h", 2), "u16": ("<H", 2),
+    "i32": ("<i", 4), "u32": ("<I", 4),
+    "i64": ("<q", 8), "u64": ("<Q", 8),
+    "f32": ("<f", 4), "f64": ("<d", 8),
+}
+
+
+def pack_value(vtype, value):
+    """A scan/write value -> the raw little-endian bytes to match or poke."""
+    if vtype == "bytes":
+        return bytes.fromhex(re.sub(r"\s+", "", value))
+    if vtype == "string":
+        return value.encode("utf-8", "replace")
+    fmt, _ = TYPES[vtype]
+    num = float(value) if vtype in ("f32", "f64") else int(value, 0)
+    return struct.pack(fmt, num)
+
+
+def unpack_value(vtype, raw):
+    if vtype == "bytes":
+        return raw.hex()
+    if vtype == "string":
+        return raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+    fmt, _ = TYPES[vtype]
+    return struct.unpack(fmt, raw)[0]
+
+
+class Target:
+    """One attached process: its maps, its memory, and the live match set."""
+
+    def __init__(self, pid):
+        self.pid = pid
+        self.mem = open(f"/proc/{pid}/mem", "r+b", buffering=0)
+        self.matches = []          # list of int addresses from the last scan
+        self.scan_type = None
+        self.scan_size = 0
+        self.freezes = {}          # addr -> (vtype, raw-bytes)
+        self._froze = threading.Event()
+
+    # --- raw memory -------------------------------------------------------
+
+    def read(self, addr, size):
+        buf = (ctypes.c_char * size)()
+        local = iovec(ctypes.cast(buf, ctypes.c_void_p), size)
+        remote = iovec(ctypes.c_void_p(addr), size)
+        n = libc.process_vm_readv(self.pid, ctypes.byref(local), 1,
+                                  ctypes.byref(remote), 1, 0)
+        if n < 0:
+            return None
+        return bytes(buf[:n])
+
+    def write(self, addr, data):
+        buf = (ctypes.c_char * len(data)).from_buffer_copy(data)
+        local = iovec(ctypes.cast(buf, ctypes.c_void_p), len(data))
+        remote = iovec(ctypes.c_void_p(addr), len(data))
+        n = libc.process_vm_writev(self.pid, ctypes.byref(local), 1,
+                                   ctypes.byref(remote), 1, 0)
+        if n == len(data):
+            return True
+        # process_vm_writev refuses read-only pages; /proc/mem can still
+        # write them because the kernel bypasses the page protection there
+        try:
+            self.mem.seek(addr)
+            self.mem.write(data)
+            return True
+        except OSError:
+            return False
+
+    # --- regions ----------------------------------------------------------
+
+    def regions(self, writable_only=True):
+        out = []
+        with open(f"/proc/{self.pid}/maps") as f:
+            for line in f:
+                parts = line.split(None, 5)
+                bounds, perms = parts[0], parts[1]
+                if writable_only and "w" not in perms:
+                    continue
+                if "r" not in perms:
+                    continue
+                path = parts[5].rstrip() if len(parts) > 5 else ""
+                # skip file-backed read-only-ish noise; keep anon + writable
+                if path in ("[vvar]", "[vsyscall]", "[vdso]"):
+                    continue
+                lo, hi = (int(x, 16) for x in bounds.split("-"))
+                out.append((lo, hi, perms, path))
+        return out
+
+    def modules(self):
+        seen = {}
+        with open(f"/proc/{self.pid}/maps") as f:
+            for line in f:
+                parts = line.split(None, 5)
+                if len(parts) < 6:
+                    continue
+                path = parts[5].rstrip()
+                if not path or path.startswith("["):
+                    continue
+                lo = int(parts[0].split("-")[0], 16)
+                if path not in seen:
+                    seen[path] = lo
+        return [{"path": p, "base": b} for p, b in
+                sorted(seen.items(), key=lambda kv: kv[1])]
+
+    # --- scanning ---------------------------------------------------------
+
+    def scan(self, vtype, value, cap=2_000_000):
+        needle = pack_value(vtype, value)
+        size = len(needle)
+        # numeric scans are alignment-aware (values sit on their own size);
+        # byte/string scans check every offset
+        step = size if vtype in TYPES else 1
+        found = []
+        truncated = False
+        for lo, hi, _perms, _path in self.regions(writable_only=True):
+            block = self.read(lo, hi - lo)
+            if not block:
+                continue
+            start = 0
+            while True:
+                i = block.find(needle, start)
+                if i < 0:
+                    break
+                if step == 1 or i % step == 0:
+                    found.append(lo + i)
+                    if len(found) >= cap:
+                        truncated = True
+                        break
+                start = i + 1
+            if truncated:
+                break
+        self.matches = found
+        self.scan_type = vtype
+        self.scan_size = size
+        return truncated
+
+    def refine(self, cmp, value=None):
+        """Keep matches that still satisfy cmp against their CURRENT value.
+        cmp: eq | ne | gt | lt | inc | dec | changed | unchanged.
+        eq/ne/gt/lt take a value; the rest compare to what we last saw."""
+        vtype = self.scan_type
+        fmt = TYPES.get(vtype, (None,))[0]
+        target = pack_value(vtype, value) if value is not None else None
+        kept = []
+        for addr in self.matches:
+            cur = self.read(addr, self.scan_size)
+            if not cur or len(cur) < self.scan_size:
+                continue
+            if cmp == "eq" and cur == target:
+                kept.append(addr)
+            elif cmp == "ne" and cur != target:
+                kept.append(addr)
+            elif cmp in ("gt", "lt") and fmt:
+                a = struct.unpack(fmt, cur)[0]
+                b = struct.unpack(fmt, target)[0]
+                if (cmp == "gt" and a > b) or (cmp == "lt" and a < b):
+                    kept.append(addr)
+        self.matches = kept
+        return len(kept)
+
+    def sample(self, n=200):
+        vtype = self.scan_type or "bytes"
+        out = []
+        for addr in self.matches[:n]:
+            raw = self.read(addr, self.scan_size or 8)
+            out.append({"addr": addr,
+                        "value": unpack_value(vtype, raw) if raw else None})
+        return out
+
+    # --- freeze -----------------------------------------------------------
+
+    def start_freeze_thread(self):
+        def loop():
+            while True:
+                for addr, (_vt, raw) in list(self.freezes.items()):
+                    self.write(addr, raw)
+                time.sleep(0.05)
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+
+
+def engine_detect(target):
+    """Identify the game engine from loaded modules — read-only, from the
+    module list alone. No injection."""
+    names = [m["path"].rsplit("/", 1)[-1].lower() for m in target.modules()]
+    joined = " ".join(names)
+    hits = []
+    engine = "unknown"
+    runtime = None
+    if "unityplayer.dll" in names or any("unity" in n for n in names):
+        engine = "Unity"
+        hits.append("UnityPlayer.dll")
+    if "gameassembly.dll" in names:
+        engine = "Unity"
+        runtime = "IL2CPP"
+        hits.append("GameAssembly.dll (IL2CPP)")
+    elif any("mono" in n and n.endswith(".dll") for n in names):
+        if engine == "Unity":
+            runtime = "Mono"
+        hits.append(next(n for n in names if "mono" in n and n.endswith(".dll")))
+    if re.search(r"-win64-shipping\.exe", joined) or "unrealengine" in joined:
+        engine = "Unreal"
+        hits.append("Win64-Shipping")
+    if any(n in ("engine.dll", "tier0.dll", "vstdlib.dll") for n in names):
+        engine = "Source"
+        hits.append("tier0/engine.dll")
+    if any("godot" in n for n in names):
+        engine = "Godot"
+        hits.append("godot")
+    renderer = None
+    if "d3d11.dll" in names or "dxgi.dll" in names:
+        renderer = "Direct3D 11 (DXVK)"
+    elif "d3d12.dll" in names or "d3d12core.dll" in names:
+        renderer = "Direct3D 12 (VKD3D)"
+    elif "opengl32.dll" in names:
+        renderer = "OpenGL"
+    return {"engine": engine, "runtime": runtime, "renderer": renderer,
+            "signatures": hits, "module_count": len(names)}
+
+
+# --- protocol loop --------------------------------------------------------
+
+def main():
+    target = None
+    reply = lambda **kw: (sys.stdout.write(json.dumps(kw) + "\n"),
+                          sys.stdout.flush())
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            cmd = json.loads(line)
+        except ValueError:
+            reply(ok=False, error="bad json")
+            continue
+        op = cmd.get("op")
+        try:
+            if op == "attach":
+                target = Target(int(cmd["pid"]))
+                target.start_freeze_thread()
+                reply(ok=True, pid=target.pid, detect=engine_detect(target))
+            elif target is None:
+                reply(ok=False, error="not attached")
+            elif op == "detect":
+                reply(ok=True, detect=engine_detect(target))
+            elif op == "modules":
+                reply(ok=True, modules=target.modules())
+            elif op == "regions":
+                reply(ok=True, regions=[
+                    {"lo": lo, "hi": hi, "perms": pr, "path": pa}
+                    for lo, hi, pr, pa in target.regions(
+                        writable_only=cmd.get("writable_only", True))])
+            elif op == "scan":
+                trunc = target.scan(cmd["type"], cmd["value"])
+                reply(ok=True, count=len(target.matches), truncated=trunc,
+                      sample=target.sample())
+            elif op == "refine":
+                n = target.refine(cmd["cmp"], cmd.get("value"))
+                reply(ok=True, count=n, sample=target.sample())
+            elif op == "list":
+                reply(ok=True, count=len(target.matches),
+                      sample=target.sample(cmd.get("n", 200)))
+            elif op == "read":
+                raw = target.read(int(cmd["addr"]), int(cmd["size"]))
+                reply(ok=raw is not None,
+                      hex=raw.hex() if raw else None,
+                      value=(unpack_value(cmd["type"], raw)
+                             if raw and cmd.get("type") in TYPES else None))
+            elif op == "write":
+                data = pack_value(cmd["type"], cmd["value"])
+                reply(ok=target.write(int(cmd["addr"]), data),
+                      wrote=len(data))
+            elif op == "freeze":
+                data = pack_value(cmd["type"], cmd["value"])
+                target.freezes[int(cmd["addr"])] = (cmd["type"], data)
+                reply(ok=True, frozen=len(target.freezes))
+            elif op == "unfreeze":
+                target.freezes.pop(int(cmd["addr"]), None)
+                reply(ok=True, frozen=len(target.freezes))
+            else:
+                reply(ok=False, error=f"unknown op {op!r}")
+        except (KeyError, ValueError, OSError) as e:
+            reply(ok=False, error=str(e))
+
+
+if __name__ == "__main__":
+    main()
