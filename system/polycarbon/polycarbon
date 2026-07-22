@@ -259,15 +259,21 @@ ask_first_run() { # target-path
     local key; key=$(perm_key "$1")
     [ -f "$PERMS_DIR/$key.perm" ] && return 0
     local name; name=$(basename "$1")
+    # The name goes into Pango markup — an app named "<foo>" or "A & B" would
+    # break the markup and make zenity error out (exit nonzero), silently
+    # forcing "Restricted". Escape the three markup-significant characters.
+    local name_esc; name_esc=$(printf '%s' "$name" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
     if command -v zenity >/dev/null 2>&1 && [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
         if zenity --question --title "Polycarbon — first run" \
-            --text "First launch of <b>$name</b>.\n\n<b>Full access</b> — the program can read and change anything your user can (how Windows programs normally run).\n\n<b>Restricted</b> — it runs in a sandbox: your home folder, its own files and the network, nothing else.\n\nChange this any time with: polycarbon config" \
+            --text "First launch of <b>$name_esc</b>.\n\n<b>Full access</b> — the program can read and change anything your user can (how Windows programs normally run).\n\n<b>Restricted</b> — it runs in a sandbox: your home folder, its own files and the network, nothing else.\n\nChange this any time with: polycarbon config" \
             --ok-label "Full access" --cancel-label "Restricted" 2>/dev/null; then
             write_perms "$key" on full on
             logmsg "first run of $name: user granted full access"
         else
+            # Cancel button OR window-dismiss both land here — Restricted is the
+            # safe default either way (the user can widen it in polycarbon config)
             write_perms "$key" off home on
-            logmsg "first run of $name: user chose restricted"
+            logmsg "first run of $name: restricted (chosen or dialog dismissed)"
         fi
     else
         write_perms "$key" on full on
@@ -289,6 +295,19 @@ confine_setup() { # target-path
     [ -f "$pf" ] || return 0
     [ "$(perm_get "$pf" ROOT on)" = on ] && return 0
     command -v bwrap >/dev/null 2>&1 || { logmsg "bwrap not installed — running unrestricted"; return 0; }
+    # bwrap can be present but non-functional (unprivileged user namespaces
+    # disabled in the kernel). Without this probe every restricted launch would
+    # fail instantly through the whole recovery ladder with no hint that the
+    # sandbox is the cause. Probe once, cache the result.
+    if [ ! -f "$BASE/.bwrap-ok" ]; then
+        if bwrap --ro-bind / / --unshare-user true 2>/dev/null; then
+            touch "$BASE/.bwrap-ok"
+        else
+            logmsg "bwrap present but non-functional (user namespaces disabled?) — running $1 unrestricted"
+            notify "Sandbox unavailable" "This kernel has user namespaces disabled, so per-app restrictions can't be enforced. $(basename "$1") runs with full access." dialog-warning
+            return 0
+        fi
+    fi
 
     # Resource caps ride on a systemd user scope; values are validated here
     # so a hand-edited file can't splice anything else into the command
@@ -345,11 +364,20 @@ QUIRKS_DIR="$BASE/quirks"
 
 # All the detectors read a log slice ($2/$1 = the current attempt's slice,
 # default whole log) so recovery judges each attempt on its own output.
-gpu_count() { grep -acE '^info:  Found device: ' "${1:-$LOG}"; }
+# Count DISTINCT GPUs: DXVK prints one "Found device:" per device, but an
+# app that creates several D3D devices repeats them — deduplicate so a
+# single-GPU box is never mistaken for multi-GPU (which would wrongly apply
+# DRI_PRIME=1 and can itself break rendering).
+gpu_count() { grep -aoE 'Found device: .*' "${1:-$LOG}" 2>/dev/null | sort -u | grep -c .; }
 
-# Does the slice look like it died in graphics/GPU init?
+# Did the slice actually DIE in graphics? The presence of DXVK/Renderer
+# chatter alone is not a crash — it appears in every healthy Vulkan run, so
+# matching it made the dxvk_off/gpu_soft guards fire for ANY crash. Require a
+# real fault signal AND a graphics context in the same slice.
 graphics_crash() {
-    grep -aqiE 'Found device:|DXVK|vkd3d|vulkan|d3d1[012]|dxgi|Process set as DPI|Renderer' "${1:-$LOG}"
+    local s=${1:-$LOG}
+    grep -aqiE 'DXVK|vkd3d|vulkan|d3d1[012]|dxgi|opengl|Renderer|Found device' "$s" 2>/dev/null \
+        && grep -aqiE 'err:|panic|exception|VK_ERROR|device lost|failed to create|DXGI_ERROR|assert|fatal|crash' "$s" 2>/dev/null
 }
 
 wgi_crash() {
@@ -944,13 +972,14 @@ sys.stdout.write("\0".join((uri if t == "%1" else t.replace("%1", uri)) for t in
     local exe_unix exe_dir
     exe_unix=$("$WINE" winepath -u "${argv[0]}" 2>/dev/null)
     exe_dir=$(dirname "$exe_unix" 2>/dev/null)
+    # The handler app's saved permissions apply to link launches too — set
+    # up confinement in BOTH branches so the fallback never runs unrestricted
+    confine_setup "$exe_unix"
     if [ -n "$exe_dir" ] && [ -d "$exe_dir" ]; then
-        # The handler app's saved permissions apply to link launches too
-        confine_setup "$exe_unix"
         logmsg "routing link to $(basename "${argv[0]}") (cwd: ${exe_dir})"
         ( cd "$exe_dir" && "${CONFINE[@]}" "$WINE" "${argv[@]}" >>"$LOG" 2>&1 )
     else
-        "$WINE" "${argv[@]}" >>"$LOG" 2>&1
+        "${CONFINE[@]}" "$WINE" "${argv[@]}" >>"$LOG" 2>&1
     fi
 }
 
@@ -985,11 +1014,20 @@ harvest_shortcuts() {
         [ -n "$lnk" ] || continue
         grep -qxF "$lnk" "$before" 2>/dev/null && continue
         name=$(basename "$lnk" .lnk)
-        # Wine's own uninstaller entries are noise, not apps
-        case "$name" in *[Uu]ninstall*) continue ;; esac
+        # Wine's own uninstaller entries are noise, not apps (any case)
+        case "${name,,}" in *uninstall*|*remove*) continue ;; esac
         slug=$(printf '%s' "$name" | tr -cs '[:alnum:]' '-' | tr '[:upper:]' '[:lower:]' | sed 's/^-//;s/-$//')
-        [ -n "$slug" ] || continue
+        # A fully non-ASCII name (CJK etc.) slugs to empty under the C locale;
+        # fall back to a short hash of the name so it still gets a launcher.
+        [ -n "$slug" ] || slug="app-$(printf '%s' "$name" | md5sum | cut -c1-8)"
         dest="$APPS_DIR/polycarbon-$slug.desktop"
+        # Two different apps can ship a same-named shortcut (Launcher.lnk).
+        # If this slug is already taken by a DIFFERENT .lnk, disambiguate with
+        # a hash of the full path so the second never overwrites the first.
+        if [ -e "$dest" ] && ! grep -qxF "Exec=\"$SELF\" \"$(printf '%s' "$lnk" | sed 's/[\\"`$]/\\&/g')\"" "$dest" 2>/dev/null; then
+            slug="$slug-$(printf '%s' "$lnk" | md5sum | cut -c1-6)"
+            dest="$APPS_DIR/polycarbon-$slug.desktop"
+        fi
         # Only announce a launcher the first time it appears. harvest runs
         # repeatedly (a live watcher during the run, then once at the end),
         # so re-creating an existing entry must stay silent — otherwise the
@@ -997,9 +1035,11 @@ harvest_shortcuts() {
         local fresh=""; [ -e "$dest" ] || fresh=1
         icon=$(_find_wine_icon "$name")
         # The .lnk name is installer-controlled and lands in a .desktop file:
-        # escape the Exec-quoted path per the spec (\ " ` $) so a hostile
-        # name can't smuggle its own Exec, and keep Name to one printable line
-        lnk_q=$(printf '%s' "$lnk" | sed 's/[\\"`$]/\\&/g')
+        # escape the Exec-quoted path per the spec — reserved chars (\ " ` $)
+        # get a backslash so a hostile name can't smuggle its own Exec, and a
+        # literal % becomes %% so launchers don't eat it as a field code.
+        # Keep Name to one printable line.
+        lnk_q=$(printf '%s' "$lnk" | sed 's/%/%%/g; s/[\\"`$]/\\&/g')
         name=$(printf '%s' "$name" | tr -d '[:cntrl:]')
         cat > "$dest" <<EOF
 [Desktop Entry]
@@ -1123,6 +1163,14 @@ main() {
         new_log
         ensure_ready force
         harvest_schemes
+        # Reconcile every existing shortcut, not just this run's new ones:
+        # apps installed before harvesting existed (or whose installer ran
+        # outside polycarbon) get a launcher now. Empty "before" = treat all
+        # as new; harvest is idempotent so existing launchers stay silent.
+        : > "$BASE/.shortcuts.none"
+        harvest_shortcuts "$BASE/.shortcuts.none"
+        clear_runner_menu_entries
+        rm -f "$BASE/.shortcuts.none"
         say "ready - double-click any .exe"
         exit 0
     fi
